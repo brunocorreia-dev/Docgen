@@ -1,88 +1,103 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-REPO="brunocorreia-dev/docgen"
-JAR_URL="https://github.com/${REPO}/releases/latest/download/docgen.jar"
-INSTALL_DIR="$HOME/.local/share/docgen"
-BIN_DIR="$HOME/.local/bin"
-WRAPPER="$BIN_DIR/docgen"
+REPO="wagcarneiro/docgen"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+BIN="$INSTALL_DIR/docgen"
+JAR="$INSTALL_DIR/docgen.jar"
+TMP_DIR="$(mktemp -d)"
 
-# ── colours ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[docgen]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[docgen]${NC} $*"; }
-error() { echo -e "${RED}[docgen] Error:${NC} $*" >&2; exit 1; }
+# Release artifacts are signed keyless by the release workflow via GitHub
+# Actions OIDC (Sigstore). The signing identity is therefore this repository's
+# release workflow running on a tag, not a long-lived key.
+CERT_IDENTITY_REGEXP="^https://github\\.com/$REPO/\\.github/workflows/release\\.yml@refs/tags/"
+CERT_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 
-# ── prereq: Java 21+ ─────────────────────────────────────────────────────────
-if ! command -v java &>/dev/null; then
-  error "Java not found. Install Java 21+ and re-run.\n  https://adoptium.net"
-fi
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT INT TERM
 
-JAVA_VERSION=$(java -version 2>&1 | head -1 | sed 's/.*version "\([0-9]*\).*/\1/')
-if (( JAVA_VERSION < 21 )); then
-  error "Java 21+ required (found Java ${JAVA_VERSION}).\n  https://adoptium.net"
-fi
-info "Java ${JAVA_VERSION} found."
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
 
-# ── prereq: Ollama (optional warning) ────────────────────────────────────────
-if ! command -v ollama &>/dev/null; then
-  warn "Ollama not found. docgen needs Ollama to run."
-  warn "Install it from https://ollama.com, then: ollama pull llama3.2"
-fi
+download() {
+  if command_exists curl; then
+    curl -fsSL "$1" -o "$2"
+  elif command_exists wget; then
+    wget -q "$1" -O "$2"
+  else
+    echo "curl or wget is required to install DocGen." >&2
+    exit 1
+  fi
+}
 
-# ── download jar ─────────────────────────────────────────────────────────────
-info "Downloading docgen.jar from GitHub releases..."
-mkdir -p "$INSTALL_DIR"
-
-if command -v curl &>/dev/null; then
-  curl -fsSL "$JAR_URL" -o "$INSTALL_DIR/docgen.jar"
-elif command -v wget &>/dev/null; then
-  wget -qO "$INSTALL_DIR/docgen.jar" "$JAR_URL"
-else
-  error "Neither curl nor wget found. Install one and re-run."
-fi
-info "Saved to $INSTALL_DIR/docgen.jar"
-
-# ── install wrapper ───────────────────────────────────────────────────────────
-mkdir -p "$BIN_DIR"
-cat > "$WRAPPER" <<'WRAPPER_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-JAR="$HOME/.local/share/docgen/docgen.jar"
-if [[ ! -f "$JAR" ]]; then
-  echo "docgen: jar not found at $JAR — run the install script again." >&2
+if ! command_exists java; then
+  echo "Java 21+ is required. Install Java before running DocGen." >&2
   exit 1
 fi
-exec java -jar "$JAR" "$@"
-WRAPPER_SCRIPT
-chmod +x "$WRAPPER"
-info "Wrapper installed at $WRAPPER"
 
-# ── PATH hint ────────────────────────────────────────────────────────────────
-if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
-  warn "$BIN_DIR is not in your PATH."
-  warn "Add this to your shell profile (~/.bashrc or ~/.zshrc):"
-  echo ""
-  echo '  export PATH="$HOME/.local/bin:$PATH"'
-  echo ""
+mkdir -p "$INSTALL_DIR"
+BASE_URL="https://github.com/$REPO/releases/latest/download"
+
+download "$BASE_URL/docgen.jar" "$TMP_DIR/docgen.jar"
+download "$BASE_URL/docgen.jar.sha256" "$TMP_DIR/docgen.jar.sha256"
+
+cd "$TMP_DIR"
+if command_exists sha256sum; then
+  sha256sum -c docgen.jar.sha256
+elif command_exists shasum; then
+  EXPECTED="$(awk '{print $1}' docgen.jar.sha256)"
+  ACTUAL="$(shasum -a 256 docgen.jar | awk '{print $1}')"
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo "Checksum verification failed." >&2; exit 1; }
+else
+  echo "sha256sum or shasum is required to verify the download." >&2
+  exit 1
 fi
 
-# ── done ─────────────────────────────────────────────────────────────────────
-echo ""
-info "Installation complete!"
-echo ""
-echo "Usage:"
-echo "  # Get your free Groq API key"
-echo "  https://console.groq.com → API Keys → Create API key"
-echo ""
-echo "  # Set your key"
-echo "  export GROQ_API_KEY=gsk_..."
-echo ""
-echo "  # Generate docs for any repo"
-echo "  docgen /path/to/repo -o /path/to/output"
-echo ""
-echo "  # Using Ollama instead (no API key needed)"
-echo "  docgen /path/to/repo --provider ollama"
-echo ""
-echo "  # Get help"
-echo "  docgen --help"
+# Signature verification policy:
+# - cosign installed: verify both artifacts against the release workflow
+#   identity; any failure (including missing signature files) aborts unless
+#   DOCGEN_SKIP_SIGNATURE=1 is set.
+# - cosign not installed: continue with checksum only and print a warning,
+#   unless DOCGEN_REQUIRE_SIGNATURE=1 is set, which aborts instead.
+if [ "${DOCGEN_SKIP_SIGNATURE:-0}" = "1" ]; then
+  echo "WARNING: DOCGEN_SKIP_SIGNATURE=1 set; skipping signature verification." >&2
+elif command_exists cosign; then
+  if ! download "$BASE_URL/docgen.jar.sigstore.json" "$TMP_DIR/docgen.jar.sigstore.json" ||
+     ! download "$BASE_URL/docgen.jar.sha256.sigstore.json" "$TMP_DIR/docgen.jar.sha256.sigstore.json"; then
+    echo "Signature bundles are missing from the latest release. Refusing to install." >&2
+    echo "Set DOCGEN_SKIP_SIGNATURE=1 to install with checksum verification only." >&2
+    exit 1
+  fi
+  cosign verify-blob \
+    --bundle docgen.jar.sigstore.json \
+    --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
+    --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
+    docgen.jar
+  cosign verify-blob \
+    --bundle docgen.jar.sha256.sigstore.json \
+    --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
+    --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
+    docgen.jar.sha256
+  echo "Signature verification passed (signed by $REPO release workflow)."
+elif [ "${DOCGEN_REQUIRE_SIGNATURE:-0}" = "1" ]; then
+  echo "DOCGEN_REQUIRE_SIGNATURE=1 is set but cosign is not installed." >&2
+  echo "Install cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and retry." >&2
+  exit 1
+else
+  echo "WARNING: cosign not found; signature verification skipped (checksum only)." >&2
+  echo "Install cosign to also verify that artifacts were built by the $REPO release workflow." >&2
+fi
+
+mv "$TMP_DIR/docgen.jar" "$JAR"
+cat > "$BIN" <<EOF
+#!/usr/bin/env sh
+exec java -jar "$JAR" "\$@"
+EOF
+chmod +x "$BIN"
+
+echo "DocGen installed at $BIN"
+echo "For Groq: export GROQ_API_KEY=... and run docgen --allow-remote /path/to/repo"
+echo "For local Ollama: run docgen --provider ollama /path/to/repo"

@@ -1,105 +1,101 @@
 package com.docgen;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.stream.Stream;
 
-public class OllamaProvider implements LLMProvider {
-
-    private static final String OLLAMA_URL = "http://localhost:11434/api/generate";
+public final class OllamaProvider implements LLMProvider {
+    private static final URI GENERATE_URL = URI.create("http://localhost:11434/api/generate");
+    private static final URI TAGS_URL = URI.create("http://localhost:11434/api/tags");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final String model;
-    private final HttpClient http;
+    private final HttpClient client;
 
     public OllamaProvider(String model) {
+        this(model, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
+    }
+
+    OllamaProvider(String model, HttpClient client) {
         this.model = model;
-        this.http = HttpClient.newHttpClient();
-        checkOllamaRunning();
+        this.client = client;
     }
 
     @Override
-    public String generate(String prompt) throws IOException, InterruptedException {
-        String body = """
-            {"model": %s, "prompt": %s, "stream": true}
-            """.formatted(jsonString(model), jsonString(prompt));
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(OLLAMA_URL))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build();
-
-        StringBuilder result = new StringBuilder();
-
-        http.send(request, HttpResponse.BodyHandlers.ofLines())
-            .body()
-            .forEach(line -> {
-                if (line.isBlank()) return;
-                String token = extractField(line, "response");
-                if (token != null && !token.isEmpty()) {
-                    System.out.print(token);
-                    System.out.flush();
-                    result.append(token);
-                }
-            });
-
-        System.out.println();
-        return result.toString();
+    public boolean isRemote() {
+        return false;
     }
 
-    private void checkOllamaRunning() {
-        try {
-            HttpRequest ping = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:11434"))
+    @Override
+    public String describeDestination() {
+        return "Ollama at " + GENERATE_URL + " (local service; model " + model + ")";
+    }
+
+    @Override
+    public String generateDocumentation(String prompt) throws Exception {
+        ensureOllamaIsRunning();
+
+        ObjectNode body = MAPPER.createObjectNode();
+        body.put("model", model);
+        body.put("prompt", prompt);
+        body.put("stream", true);
+
+        HttpRequest request = HttpRequest.newBuilder(GENERATE_URL)
+                .timeout(Duration.ofMinutes(10))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
+                .build();
+
+        HttpResponse<Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Ollama generation failed with HTTP " + response.statusCode());
+        }
+
+        StringBuilder output = new StringBuilder();
+        try (Stream<String> lines = response.body()) {
+            lines.forEach(line -> appendResponseLine(line, output));
+        }
+        if (output.isEmpty()) {
+            throw new IOException("Ollama returned an empty response.");
+        }
+        return output.toString().trim();
+    }
+
+    private void ensureOllamaIsRunning() throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(TAGS_URL)
+                .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();
-            http.send(ping, HttpResponse.BodyHandlers.discarding());
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                "Ollama is not running. Start it with: ollama serve"
-            );
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Ollama is not responding on http://localhost:11434 (HTTP " + response.statusCode() + ").");
         }
     }
 
-    // Extracts the value of a JSON string field from a flat JSON line.
-    // Handles common escape sequences (\n, \t, \\, \").
-    private String extractField(String json, String field) {
-        String key = "\"" + field + "\":\"";
-        int start = json.indexOf(key);
-        if (start < 0) return null;
-        start += key.length();
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '\\' && i + 1 < json.length()) {
-                char next = json.charAt(++i);
-                switch (next) {
-                    case 'n' -> sb.append('\n');
-                    case 't' -> sb.append('\t');
-                    case 'r' -> sb.append('\r');
-                    case '"' -> sb.append('"');
-                    case '\\' -> sb.append('\\');
-                    default -> { sb.append('\\'); sb.append(next); }
-                }
-            } else if (c == '"') {
-                break;
-            } else {
-                sb.append(c);
+    private static void appendResponseLine(String line, StringBuilder output) {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        try {
+            JsonNode node = MAPPER.readTree(line);
+            JsonNode response = node.path("response");
+            if (response.isTextual()) {
+                output.append(response.asText());
             }
+            JsonNode error = node.path("error");
+            if (error.isTextual() && !error.asText().isBlank()) {
+                throw new IllegalStateException("Ollama error: " + error.asText());
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Invalid JSON line returned by Ollama.", e);
         }
-        return sb.toString();
-    }
-
-    private String jsonString(String s) {
-        return "\"" + s
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-            + "\"";
     }
 }

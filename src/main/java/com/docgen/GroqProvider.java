@@ -1,136 +1,122 @@
 package com.docgen;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class GroqProvider implements LLMProvider {
-
-    private static final String API_URL = "https://api.groq.com/openai/v1/chat/completions";
+public final class GroqProvider implements LLMProvider {
+    private static final URI API_URL = URI.create("https://api.groq.com/openai/v1/chat/completions");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Pattern RETRY_AFTER_BODY = Pattern.compile("try again in ([0-9.]+)s", Pattern.CASE_INSENSITIVE);
 
     private final String model;
     private final String apiKey;
-    private final HttpClient http;
+    private final HttpClient client;
 
-    public GroqProvider(String model, String apiKey) {
+    public GroqProvider(String model) {
+        this(model, System.getenv("GROQ_API_KEY"), HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
+    }
+
+    GroqProvider(String model, String apiKey, HttpClient client) {
         this.model = model;
-        this.apiKey = resolveApiKey(apiKey);
-        this.http = HttpClient.newHttpClient();
+        this.apiKey = apiKey;
+        this.client = client;
     }
 
     @Override
-    public String generate(String prompt) throws IOException, InterruptedException {
-        String body = """
-            {
-              "model": %s,
-              "messages": [
-                {"role": "user", "content": %s}
-              ],
-              "temperature": 0.2
+    public boolean isRemote() {
+        return true;
+    }
+
+    @Override
+    public String describeDestination() {
+        return "Groq at " + API_URL + " (remote service; model " + model + ")";
+    }
+
+    @Override
+    public String generateDocumentation(String prompt) throws Exception {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException("GROQ_API_KEY is required for the Groq provider.");
+        }
+
+        String body = buildRequestBody(prompt);
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            HttpRequest request = HttpRequest.newBuilder(API_URL)
+                    .timeout(Duration.ofMinutes(5))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            if (status >= 200 && status < 300) {
+                return parseContent(response.body());
             }
-            """.formatted(jsonString(model), jsonString(prompt));
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(API_URL))
-            .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer " + apiKey)
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build();
-
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() == 429) {
-            long waitSeconds = extractRetrySeconds(response.body()) + 2;
-            System.out.println("[docgen] Rate limit hit, waiting " + waitSeconds + "s...");
-            Thread.sleep(waitSeconds * 1000);
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (attempt < 3 && (status == 429 || status >= 500)) {
+                sleepBeforeRetry(response);
+                continue;
+            }
+            throw new IOException("Groq request failed with HTTP " + status + ": " + abbreviate(response.body(), 500));
         }
-
-        if (response.statusCode() != 200) {
-            throw new IOException("Groq API error " + response.statusCode() + ": " + response.body());
-        }
-
-        String text = extractContent(response.body());
-        if (text == null) {
-            throw new IOException("Could not parse Groq response: " + response.body());
-        }
-
-        System.out.print(text);
-        System.out.println();
-        return text;
+        throw new IOException("Groq request failed after retries.");
     }
 
-    // Extracts seconds from "try again in X.XXs"; returns 10 as fallback.
-    private long extractRetrySeconds(String body) {
-        Matcher m = Pattern.compile("try again in (\\d+(?:\\.\\d+)?)s").matcher(body);
-        if (m.find()) {
-            return (long) Math.ceil(Double.parseDouble(m.group(1)));
+    private String buildRequestBody(String prompt) throws IOException {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("model", model);
+        root.put("temperature", 0.2);
+        root.put("max_tokens", 4096);
+        root.putArray("messages")
+                .addObject()
+                .put("role", "user")
+                .put("content", prompt);
+        return MAPPER.writeValueAsString(root);
+    }
+
+    private static String parseContent(String body) throws IOException {
+        JsonNode root = MAPPER.readTree(body);
+        JsonNode content = root.path("choices").path(0).path("message").path("content");
+        if (!content.isTextual() || content.asText().isBlank()) {
+            throw new IOException("Groq response did not contain choices[0].message.content.");
         }
-        return 10;
+        return content.asText().trim();
     }
 
-    // Navigates choices[0].message.content without a JSON library.
-    // Finds "choices" → "message" → "content": → extracts the string value.
-    private String extractContent(String json) {
-        int choicesIdx = json.indexOf("\"choices\"");
-        if (choicesIdx < 0) return null;
-
-        int messageIdx = json.indexOf("\"message\"", choicesIdx);
-        if (messageIdx < 0) return null;
-
-        int contentIdx = json.indexOf("\"content\":", messageIdx);
-        if (contentIdx < 0) return null;
-
-        int valueStart = json.indexOf("\"", contentIdx + "\"content\":".length());
-        if (valueStart < 0) return null;
-
-        return extractStringValue(json, valueStart + 1);
+    private static void sleepBeforeRetry(HttpResponse<String> response) throws InterruptedException {
+        long seconds = retryAfterSeconds(response).orElse(2L);
+        Thread.sleep(Math.min(seconds, 60L) * 1000L);
     }
 
-    private String extractStringValue(String json, int start) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '\\' && i + 1 < json.length()) {
-                char next = json.charAt(++i);
-                switch (next) {
-                    case 'n' -> sb.append('\n');
-                    case 't' -> sb.append('\t');
-                    case 'r' -> sb.append('\r');
-                    case '"' -> sb.append('"');
-                    case '\\' -> sb.append('\\');
-                    default -> { sb.append('\\'); sb.append(next); }
-                }
-            } else if (c == '"') {
-                break;
-            } else {
-                sb.append(c);
+    private static Optional<Long> retryAfterSeconds(HttpResponse<String> response) {
+        Optional<String> header = response.headers().firstValue("Retry-After");
+        if (header.isPresent()) {
+            try {
+                return Optional.of(Math.max(1L, Long.parseLong(header.get().trim())));
+            } catch (NumberFormatException ignored) {
+                return Optional.empty();
             }
         }
-        return sb.toString();
+        Matcher matcher = RETRY_AFTER_BODY.matcher(response.body() == null ? "" : response.body());
+        if (matcher.find()) {
+            return Optional.of(Math.max(1L, (long) Math.ceil(Double.parseDouble(matcher.group(1)))));
+        }
+        return Optional.empty();
     }
 
-    private String resolveApiKey(String flagKey) {
-        if (flagKey != null && !flagKey.isBlank()) return flagKey;
-        String envKey = System.getenv("GROQ_API_KEY");
-        if (envKey != null && !envKey.isBlank()) return envKey;
-        throw new IllegalStateException(
-            "Groq API key not found. Set GROQ_API_KEY or use --api-key.\n" +
-            "Get your free key at https://console.groq.com"
-        );
-    }
-
-    private String jsonString(String s) {
-        return "\"" + s
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-            + "\"";
+    private static String abbreviate(String value, int max) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= max ? value : value.substring(0, max) + "...";
     }
 }
