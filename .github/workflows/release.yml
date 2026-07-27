@@ -4,39 +4,102 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  dependency-scan:
+    if: github.repository == 'brunocorreia-dev/Docgen'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      ref: ${{ github.sha }}
+      scan-args: |-
+        -r
+        ./
+      fail-on-vuln: true
+      upload-sarif: true
+
+  build-artifacts:
+    if: github.repository == 'brunocorreia-dev/Docgen'
+    needs: dependency-scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Checkout immutable release commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Set up Java
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with:
           distribution: temurin
           java-version: '21'
+          verify-signature: true
           cache: maven
-      - name: Build and test
+      - name: Build, test, and generate CycloneDX SBOM
         run: mvn -B verify
-      - name: Create checksum
-        run: cd target && sha256sum docgen.jar > docgen.jar.sha256
+      - name: Create checksums
+        working-directory: target
+        run: |
+          sha256sum docgen.jar > docgen.jar.sha256
+          sha256sum docgen.cdx.json > docgen.cdx.json.sha256
+      - name: Store release artifacts for the signing job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets-${{ github.run_id }}
+          path: |
+            target/docgen.jar
+            target/docgen.jar.sha256
+            target/docgen.cdx.json
+            target/docgen.cdx.json.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-upload:
+    if: github.repository == 'brunocorreia-dev/Docgen'
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    steps:
+      - name: Retrieve release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets-${{ github.run_id }}
+          path: target
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign artifacts (keyless, GitHub OIDC)
         run: |
           cosign sign-blob --yes --bundle target/docgen.jar.sigstore.json target/docgen.jar
           cosign sign-blob --yes --bundle target/docgen.jar.sha256.sigstore.json target/docgen.jar.sha256
+          cosign sign-blob --yes --bundle target/docgen.cdx.json.sigstore.json target/docgen.cdx.json
+          cosign sign-blob --yes --bundle target/docgen.cdx.json.sha256.sigstore.json target/docgen.cdx.json.sha256
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: >
-          gh release upload "${{ github.event.release.tag_name }}"
+          gh release upload -- "$RELEASE_TAG"
           target/docgen.jar
           target/docgen.jar.sha256
           target/docgen.jar.sigstore.json
           target/docgen.jar.sha256.sigstore.json
-          --clobber
+          target/docgen.cdx.json
+          target/docgen.cdx.json.sha256
+          target/docgen.cdx.json.sigstore.json
+          target/docgen.cdx.json.sha256.sigstore.json
