@@ -104,7 +104,8 @@ When a generation run proceeds, the prompt contains: the redacted content of eve
 
 ## Installation from release
 
-```shcurl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/docgen/main/install.sh | sh
+```sh
+curl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/docgen/main/install.sh | sh
 ```
 
 The installer downloads `docgen.jar` from the latest GitHub release and always verifies the SHA-256 checksum. If [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) is installed, it also verifies the Sigstore signatures and refuses to install artifacts that were not produced by this repository's release workflow. Set `DOCGEN_REQUIRE_SIGNATURE=1` to make cosign mandatory, or `DOCGEN_SKIP_SIGNATURE=1` to opt out of signature checks (checksum still applies).
