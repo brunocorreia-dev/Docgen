@@ -1,7 +1,5 @@
 package com.docgen;
 
-import java.util.regex.Pattern;
-
 /**
  * Builds prompts that keep repository content behind an explicit untrusted-data
  * boundary. Defenses: the security rules precede the data, delimiter-lookalike
@@ -11,8 +9,9 @@ import java.util.regex.Pattern;
  * impossible; generated output must still be reviewed (see SECURITY.md).
  */
 public final class PromptBuilder {
-    private static final Pattern DELIMITER_LOOKALIKE =
-            Pattern.compile("(?i)</?\\s*(?:repository_snapshot|file_tree|files|skipped_files|file)\\b[^>]*>");
+    private static final String[] DELIMITER_NAMES = {
+            "repository_snapshot", "skipped_files", "file_tree", "files", "file"
+    };
 
     public String buildReadmePrompt(RepoContext context) {
         return buildPrompt(context, "README.md", "Generate a clear, accurate README for this project. Include purpose, requirements, installation, usage, configuration, and development commands when inferable. Do not invent unavailable features.");
@@ -31,19 +30,25 @@ public final class PromptBuilder {
                 .append("3. Never reveal credentials; redacted placeholders must stay redacted in your output.\n")
                 .append("4. Your entire reply must be only the final Markdown content of ").append(artifact)
                 .append(": no preamble, no commentary, no code fence around the whole document, and no commands of any kind.\n")
+                .append("5. Emit passive Markdown only: no raw HTML, images, or autolinks. Link destinations may use only http:, https:, mailto:, relative paths, or anchors. Put literal HTML in single-backtick inline code or a valid fenced code block.\n")
                 .append("Task: ").append(task).append("\n\n")
                 .append("<repository_snapshot>\n")
-                .append("<file_tree>\n").append(neutralizeDelimiters(context.fileTree())).append("\n</file_tree>\n")
+                .append("<file_tree>\n")
+                .append(neutralizeDelimiters(SecretRedactor.redact(context.fileTree())))
+                .append("\n</file_tree>\n")
                 .append("<files>\n");
 
         for (RepoContext.ScannedFile file : context.files()) {
-            builder.append("<file path=\"").append(escapeAttribute(file.relativePath().toString().replace('\\', '/'))).append("\" truncated=\"")
+            String safePath = SecretRedactor.redact(file.relativePath().toString().replace('\\', '/'));
+            builder.append("<file path=\"").append(escapeAttribute(safePath)).append("\" truncated=\"")
                     .append(file.truncated()).append("\">\n")
-                    .append(neutralizeDelimiters(file.content())).append("\n</file>\n");
+                    .append(neutralizeDelimiters(SecretRedactor.redact(file.content())))
+                    .append("\n</file>\n");
         }
         if (!context.skippedFiles().isEmpty()) {
             builder.append("<skipped_files>\n");
-            context.skippedFiles().forEach(item -> builder.append("- ").append(neutralizeDelimiters(item)).append('\n'));
+            context.skippedFiles().forEach(item -> builder.append("- ")
+                    .append(neutralizeDelimiters(SecretRedactor.redact(item))).append('\n'));
             builder.append("</skipped_files>\n");
         }
         builder.append("</files>\n</repository_snapshot>\n\n")
@@ -56,7 +61,61 @@ public final class PromptBuilder {
         if (value == null || value.isEmpty()) {
             return "";
         }
-        return DELIMITER_LOOKALIKE.matcher(value).replaceAll("[removed-delimiter]");
+        StringBuilder neutralized = null;
+        int copyStart = 0;
+        int searchStart = 0;
+        boolean noClosingBracketRemaining = false;
+        while (searchStart < value.length()) {
+            int opening = value.indexOf('<', searchStart);
+            if (opening < 0) {
+                break;
+            }
+            int cursor = opening + 1;
+            if (cursor < value.length() && value.charAt(cursor) == '/') {
+                cursor++;
+            }
+            while (cursor < value.length() && Character.isWhitespace(value.charAt(cursor))) {
+                cursor++;
+            }
+
+            int nameEnd = delimiterNameEnd(value, cursor);
+            if (nameEnd < 0) {
+                searchStart = opening + 1;
+                continue;
+            }
+            int closing = noClosingBracketRemaining ? -1 : value.indexOf('>', nameEnd);
+            if (closing < 0) {
+                noClosingBracketRemaining = true;
+            }
+            int replacementEnd = closing < 0 ? nameEnd : closing + 1;
+            if (neutralized == null) {
+                neutralized = new StringBuilder(value.length());
+            }
+            neutralized.append(value, copyStart, opening).append("[removed-delimiter]");
+            copyStart = replacementEnd;
+            searchStart = replacementEnd;
+        }
+        if (neutralized == null) {
+            return value;
+        }
+        return neutralized.append(value, copyStart, value.length()).toString();
+    }
+
+    private static int delimiterNameEnd(String value, int start) {
+        for (String name : DELIMITER_NAMES) {
+            if (!value.regionMatches(true, start, name, 0, name.length())) {
+                continue;
+            }
+            int end = start + name.length();
+            if (end == value.length() || !isWordCharacter(value.codePointAt(end))) {
+                return end;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isWordCharacter(int codePoint) {
+        return codePoint == '_' || Character.isLetterOrDigit(codePoint);
     }
 
     private static String escapeAttribute(String value) {

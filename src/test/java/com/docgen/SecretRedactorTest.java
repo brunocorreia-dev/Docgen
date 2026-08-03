@@ -57,6 +57,13 @@ class SecretRedactorTest {
                 Arguments.of("hf_", "abcdefghijklmnopqrstuvwxyz"),
                 Arguments.of("dop_v1_", "0123456789abcdef0123456789abcdef01234567"),
                 Arguments.of("sh", "pat_0123456789abcdef0123456789abcdef"),
+                Arguments.of("hvs.", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("atlasv1.", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("ddapi_", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("sntrys_", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("ops_", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("mfa.", "abcdefghijklmnopqrstuvwx"),
+                Arguments.of("AGE-SECRET-KEY-1", "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"),
                 Arguments.of("eyJhbGciOiJIUzI1NiJ9.", "eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop")
         );
     }
@@ -105,6 +112,30 @@ class SecretRedactorTest {
     }
 
     @Test
+    void redactsUnterminatedPrivateKeyBlockWithoutRegexBacktracking() {
+        String adversarial = "prefix\n" + "-----BEGIN PRIVATE KEY-----\n".repeat(10_000)
+                + "secret material without a footer";
+
+        String redacted = SecretRedactor.redact(adversarial);
+
+        assertEquals("prefix\n[REDACTED_SECRET]", redacted);
+    }
+
+    @Test
+    void handlesManyMalformedCredentialTagsWithoutUnboundedAttributeScanning() {
+        String adversarial = "<password ".repeat(10_000);
+
+        assertEquals(adversarial, SecretRedactor.redact(adversarial));
+    }
+
+    @Test
+    void handlesManyJwtPrefixesWithoutQuadraticRegexRetries() {
+        String adversarial = "-eyJ".repeat(10_000);
+
+        assertEquals(adversarial, SecretRedactor.redact(adversarial));
+    }
+
+    @Test
     void redactsQuotedJsonAssignmentsAndValuesWithSpaces() {
         String input = "{\"client_secret\": \"s3cr3t value with spaces\", \"aws_secret_access_key\": \"wJalrXUtnFEMI/K7MDENG\"}";
 
@@ -113,6 +144,32 @@ class SecretRedactorTest {
         assertFalse(redacted.contains("s3cr3t value with spaces"));
         assertFalse(redacted.contains("wJalrXUtnFEMI/K7MDENG"));
         assertTrue(redacted.contains("\"client_secret\": \"[REDACTED_SECRET]\""));
+    }
+
+    @Test
+    void redactsCredentialCommandLineArgumentsWithoutTouchingOrdinaryFlags() {
+        String input = "deploy --verbose --password hunter2 --api-key=\"key value\" --region local";
+
+        String redacted = SecretRedactor.redact(input);
+
+        assertFalse(redacted.contains("hunter2"));
+        assertFalse(redacted.contains("key value"));
+        assertTrue(redacted.contains("--password [REDACTED_SECRET]"));
+        assertTrue(redacted.contains("--api-key=\"[REDACTED_SECRET]\""));
+        assertTrue(redacted.contains("--verbose"));
+        assertTrue(redacted.contains("--region local"));
+    }
+
+    @Test
+    void redactsSimpleCredentialXmlElementsAndPreservesMarkup() {
+        String input = "<config><username>admin</username><password>value with spaces</password><tokenizer>word</tokenizer></config>";
+
+        String redacted = SecretRedactor.redact(input);
+
+        assertFalse(redacted.contains("value with spaces"));
+        assertTrue(redacted.contains("<password>[REDACTED_SECRET]</password>"));
+        assertTrue(redacted.contains("<username>admin</username>"));
+        assertTrue(redacted.contains("<tokenizer>word</tokenizer>"));
     }
 
     @Test

@@ -4,7 +4,49 @@ target/
 *.war
 *.ear
 dependency-reduced-pom.xml
+
+# IDE and operating-system state
 .idea/
 *.iml
 .DS_Store
-dependency-reduced-pom.xml
+
+# Local agent state (project-owned configuration can still be tracked explicitly)
+.agents/
+.claude/
+claude/
+.codex/
+.cursor/
+.continue/
+.windsurf/
+.aider/
+.gemini/
+
+# Environment files and credentials
+.env
+.env.*
+.env-*
+!.env.example
+!.env.sample
+!.env.template
+.envrc
+.npmrc
+.pypirc
+.netrc
+.git-credentials
+credentials*
+.secrets/
+secrets/
+secrets.*
+
+# Private keys and key stores
+*.key
+*.pem
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+id_dsa*
+id_ecdsa*

@@ -79,11 +79,50 @@ class DocGenCLITest {
     void remoteProviderStillRequiresAllowRemote() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 
-        int exitCode = new CommandLine(new DocGenCLI()).execute(repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("-o", out.toString(), repo.toString());
 
         assertEquals(1, exitCode);
         assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
         assertFalse(Files.exists(repo.resolve("ARCHITECTURE.md")), "nothing must be generated without consent");
+    }
+
+    @Test
+    void yesNeverReplacesTheAllowRemoteBoundary() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("--yes", "-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
+        assertFalse(Files.exists(repo.resolve("README.md")));
+    }
+
+    @Test
+    void nonInteractiveRemoteRunRequiresExplicitYes() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("--allow-remote", "-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--yes"));
+        assertFalse(Files.exists(repo.resolve("README.md")), "no provider may be contacted without explicit non-interactive consent");
+    }
+
+    @Test
+    void previewPromptRefusesOverwriteWithoutForce() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        Path existing = out.resolve(DocGenCLI.README_PROMPT_FILE);
+        Files.writeString(existing, "keep-me");
+
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("--preview-prompt", "-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        assertEquals("keep-me", Files.readString(existing));
+        assertFalse(Files.exists(out.resolve(DocGenCLI.ARCHITECTURE_PROMPT_FILE)));
     }
 
     @Test
@@ -94,5 +133,55 @@ class DocGenCLITest {
 
         assertEquals(1, exitCode);
         assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("no files matched"));
+    }
+
+    @Test
+    void missingOutputFailsBeforeProviderConstruction() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        Path missingOutput = out.resolve("missing");
+
+        int exitCode = new CommandLine(new DocGenCLI()).execute(
+                "--provider", "provider-that-does-not-exist",
+                "-o", missingOutput.toString(),
+                repo.toString()
+        );
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("Output directory must already exist"), error);
+        assertFalse(error.contains("provider-that-does-not-exist"), error);
+        assertFalse(Files.exists(missingOutput));
+    }
+
+    @Test
+    void existingOutputWithoutForceFailsBeforeProviderConstruction() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        Files.writeString(out.resolve("README.md"), "keep-me");
+
+        int exitCode = new CommandLine(new DocGenCLI()).execute(
+                "--provider", "provider-that-does-not-exist",
+                "-o", out.toString(),
+                repo.toString()
+        );
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("Use --force to overwrite"), error);
+        assertFalse(error.contains("provider-that-does-not-exist"), error);
+        assertEquals("keep-me", Files.readString(out.resolve("README.md")));
+        assertFalse(Files.exists(out.resolve("ARCHITECTURE.md")));
+    }
+
+    @Test
+    void dryRunDoesNotRequireOrCreateOutputDirectory() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        Path missingOutput = out.resolve("missing-dry-run");
+
+        int exitCode = new CommandLine(new DocGenCLI()).execute(
+                "--dry-run", "-o", missingOutput.toString(), repo.toString());
+
+        assertEquals(0, exitCode, () -> stderr.toString(StandardCharsets.UTF_8));
+        assertFalse(Files.exists(missingOutput));
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("No provider was contacted"));
     }
 }

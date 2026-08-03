@@ -6,7 +6,6 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.io.Console;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -33,7 +32,7 @@ public final class DocGenCLI implements Callable<Integer> {
     @Option(names = "--allow-remote", description = "Required when using Groq because repository content is sent to a remote API.")
     private boolean allowRemote;
 
-    @Option(names = "--force", description = "Overwrite README.md and ARCHITECTURE.md if they already exist.")
+    @Option(names = "--force", description = "Overwrite existing documentation or prompt-preview files.")
     private boolean force;
 
     @Option(names = "--dry-run", description = "List the files that would be included or excluded, then exit without contacting any provider.")
@@ -61,7 +60,7 @@ public final class DocGenCLI implements Callable<Integer> {
             RepoScanner.Options options = RepoScanner.Options.withAllowedExtensions(includeExtensions);
             RepoContext context = scanner.scan(repository, options);
 
-            System.out.println("Scanning: " + context.root());
+            System.out.println("Scanning: " + SafeText.forTerminal(context.root().toString()));
             System.out.println("Files included: " + context.files().size());
 
             if (dryRun) {
@@ -72,6 +71,13 @@ public final class DocGenCLI implements Callable<Integer> {
             if (context.files().isEmpty()) {
                 System.err.println("Error: no files matched the scan filters; nothing to document. Run with --dry-run to inspect the selection.");
                 return 1;
+            }
+
+            OutputWriter outputWriter = new OutputWriter();
+            if (previewPrompt) {
+                new PromptPreviewWriter().preflight(output, force);
+            } else {
+                outputWriter.preflight(output, force);
             }
 
             PromptBuilder promptBuilder = new PromptBuilder();
@@ -90,17 +96,37 @@ public final class DocGenCLI implements Callable<Integer> {
             }
 
             System.out.println("Generating README.md...");
-            String readme = llmProvider.generateDocumentation(readmePrompt);
+            String readme = DocumentationValidator.redactAndValidate(
+                    llmProvider.generateDocumentation(readmePrompt), "README.md");
             System.out.println("Generating ARCHITECTURE.md...");
-            String architecture = llmProvider.generateDocumentation(architecturePrompt);
+            String architecture = DocumentationValidator.redactAndValidate(
+                    llmProvider.generateDocumentation(architecturePrompt), "ARCHITECTURE.md");
 
-            new OutputWriter().write(output, readme, architecture, force);
-            System.out.println("Documentation written to: " + output.toAbsolutePath().normalize());
+            outputWriter.write(output, readme, architecture, force);
+            System.out.println("Documentation written to: "
+                    + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             return 0;
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+            System.err.println("Error: " + safeFailureMessage(e));
             return 1;
         }
+    }
+
+    static String safeFailureMessage(Throwable failure) {
+        StringBuilder diagnostic = new StringBuilder();
+        if (failure != null) {
+            diagnostic.append(SafeText.forTerminal(failure.getMessage()));
+        }
+        if (failure != null) {
+            Throwable[] suppressed = failure.getSuppressed();
+            for (int index = 0; index < suppressed.length && index < 3; index++) {
+                if (!diagnostic.isEmpty()) {
+                    diagnostic.append("; ");
+                }
+                diagnostic.append(SafeText.forTerminal(suppressed[index].getMessage()));
+            }
+        }
+        return SafeText.forTerminal(diagnostic.toString());
     }
 
     private void printDryRun(RepoContext context) {
@@ -112,53 +138,53 @@ public final class DocGenCLI implements Callable<Integer> {
             System.out.println("  (none)");
         }
         for (RepoContext.ScannedFile file : context.files()) {
-            System.out.println("  + " + file.relativePath().toString().replace('\\', '/')
+            System.out.println("  + " + SafeText.forTerminal(file.relativePath().toString().replace('\\', '/'))
                     + " (" + file.content().length() + " chars" + (file.truncated() ? ", truncated" : "") + ")");
         }
         if (!context.skippedFiles().isEmpty()) {
             System.out.println();
             System.out.println("Skipped by size limits (names are listed inside the prompt, content is not sent):");
-            context.skippedFiles().forEach(item -> System.out.println("  - " + item));
+            context.skippedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
         }
         if (!context.excludedFiles().isEmpty()) {
             System.out.println();
             System.out.println("Excluded (neither name nor content is sent):");
-            context.excludedFiles().forEach(item -> System.out.println("  - " + item));
+            context.excludedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
         }
         System.out.println();
         System.out.println("Total prompt content: " + context.totalCharacters() + " chars from " + context.files().size() + " files.");
     }
 
     private void writePromptPreviews(String readmePrompt, String architecturePrompt) throws Exception {
-        Files.createDirectories(output);
-        Path readmePreview = output.resolve(README_PROMPT_FILE);
-        Path architecturePreview = output.resolve(ARCHITECTURE_PROMPT_FILE);
-        Files.writeString(readmePreview, readmePrompt);
-        Files.writeString(architecturePreview, architecturePrompt);
+        new PromptPreviewWriter().write(output, readmePrompt, architecturePrompt, force);
+        Path readmePreview = output.toAbsolutePath().normalize().resolve(README_PROMPT_FILE);
+        Path architecturePreview = output.toAbsolutePath().normalize().resolve(ARCHITECTURE_PROMPT_FILE);
         System.out.println("Prompt previews written (no provider was contacted, nothing left this machine):");
-        System.out.println("  " + readmePreview.toAbsolutePath().normalize());
-        System.out.println("  " + architecturePreview.toAbsolutePath().normalize());
+        System.out.println("  " + SafeText.forTerminal(readmePreview.toString()));
+        System.out.println("  " + SafeText.forTerminal(architecturePreview.toString()));
         System.out.println("Review them to see exactly what a real run would send.");
     }
 
     /**
      * Prints what is about to leave the machine and, when running on an
      * interactive console without --yes, requires an explicit confirmation.
-     * Non-interactive runs proceed on --allow-remote alone (already enforced by
-     * the provider factory) but still get the warning on stderr.
+     * Non-interactive runs require --yes as the explicit second consent signal.
      */
     private boolean confirmRemoteSend(RepoContext context, LLMProvider llmProvider) {
         System.err.println();
-        System.err.println("WARNING: about to send data to " + llmProvider.describeDestination() + ".");
+        System.err.println("WARNING: about to send data to "
+                + SafeText.forTerminal(llmProvider.describeDestination()) + ".");
         System.err.println("Data that leaves this machine: redacted content of " + context.files().size()
                 + " files (" + context.totalCharacters() + " chars), all included file paths, and the names of size-skipped files.");
+        System.err.println("A normal run sends two prompts (README and architecture); Groq may make up to three attempts for each prompt after rate-limit or server errors.");
         System.err.println("Secret redaction is best-effort. Use --dry-run or --preview-prompt to inspect first.");
         if (assumeYes) {
             return true;
         }
         Console console = System.console();
         if (console == null) {
-            return true;
+            System.err.println("Aborted: no interactive console is available. Re-run with both --allow-remote and --yes to consent non-interactively.");
+            return false;
         }
         String answer = console.readLine("Continue? [y/N] ");
         if (answer == null) {
