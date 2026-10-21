@@ -172,7 +172,9 @@ class OutputWriterTest {
         OutputWriter writer = new OutputWriter((event, target) -> {
             if (event == SecurePairWriter.Event.BEFORE_QUARANTINE_MOVE
                     && target.equals(Path.of("README.md"))) {
-                Files.delete(readme);
+                // Move instead of delete: keeping the original inode alive stops the
+                // filesystem from reusing it, which would make the swap undetectable.
+                Files.move(readme, tempDir.resolve("displaced-readme"));
                 Files.writeString(readme, "third-party-content");
             }
         });
