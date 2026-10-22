@@ -109,8 +109,8 @@ O **DocGen** é uma aplicação de linha de comando que lê um repositório loca
 
 ## Como o DocGen funciona
 
-1. **Argumentos da CLI**: o picocli interpreta as opções em `DocGenCLI`.
-2. **Validação**: provedor, consentimento remoto e caminhos são verificados.
+1. **Argumentos da CLI**: o picocli interpreta as opções em `DocGenCLI` e cria um `DocumentationRequest`.
+2. **Orquestração reutilizável**: o `DocumentationService` executa o pipeline sem depender de terminal e devolve um `DocumentationResult` estruturado.
 3. **Leitura do repositório**: o `RepoScanner` percorre a árvore apenas por meio de handles `SecureDirectoryStream`, sem seguir symlinks.
 4. **Regras de exclusão**: exclusões internas, `.gitignore`, `.docgenignore` e `--include-ext`.
 5. **Dados sensíveis**: arquivos sensíveis são ignorados e o `SecretRedactor` redige segredos no conteúdo e nos caminhos.
@@ -122,7 +122,8 @@ O **DocGen** é uma aplicação de linha de comando que lê um repositório loca
 
 ```mermaid
 flowchart TD
-    A["Argumentos da CLI<br/>DocGenCLI"] --> B["Varredura segura<br/>RepoScanner + DocgenIgnore"]
+    A["Argumentos da CLI<br/>DocGenCLI"] --> S["Motor reutilizável<br/>DocumentationService"]
+    S --> B["Varredura segura<br/>RepoScanner + DocgenIgnore"]
     B --> C["Redação de segredos<br/>SecretRedactor"]
     C --> D{"--dry-run?"}
     D -- sim --> D1["Relatório de seleção<br/>e encerramento"]
@@ -410,24 +411,28 @@ Em cada uma das duas requisições: o conteúdo redigido dos arquivos incluídos
 
 ## Arquitetura do projeto
 
-O DocGen é uma CLI enxuta, organizada como um **pipeline linear** no pacote `com.docgen`:
+O DocGen mantém a interface CLI separada de um **motor reutilizável** no pacote `com.docgen`:
 
 ```text
 DocGenCLI
-  -> RepoScanner (+ DocgenIgnore, SecretRedactor)
-  -> [--dry-run encerra aqui]
-  -> preflight seguro de saída/pré-visualização
-  -> PromptBuilder
-  -> [--preview-prompt encerra aqui, antes de qualquer provedor existir]
-  -> LLMProviderFactory
-      -> GroqProvider | OllamaProvider
-  -> DocumentationValidator
-  -> OutputWriter (revalida antes da publicação)
+  -> DocumentationRequest
+  -> DocumentationService
+      -> RepoScanner (+ DocgenIgnore, SecretRedactor)
+      -> [--dry-run encerra aqui]
+      -> preflight seguro de saída/pré-visualização
+      -> PromptBuilder
+      -> [--preview-prompt encerra aqui, antes de qualquer provedor existir]
+      -> LLMProviderFactory
+          -> GroqProvider | OllamaProvider
+      -> DocumentationValidator
+      -> OutputWriter (revalida antes da publicação)
+  -> DocumentationResult
 ```
 
 | Responsabilidade | Classes |
 |---|---|
-| Interface CLI e orquestração | `DocGenCLI` |
+| Interface de terminal | `DocGenCLI` |
+| Contratos e orquestração reutilizável | `DocumentationRequest`, `DocumentationResult`, `DocumentationService` |
 | Leitura do repositório | `RepoScanner`, `RepoContext` |
 | Filtros e segurança | `DocgenIgnore`, `SecretRedactor`, `SafeText` |
 | Construção dos prompts | `PromptBuilder` |
@@ -435,7 +440,7 @@ DocGenCLI
 | Validação | `DocumentationValidator` |
 | Persistência | `OutputWriter`, `PromptPreviewWriter`, `SecurePairWriter` |
 
-O `LLMProvider` abstrai os provedores. Cada implementação declara `isRemote()` e `describeDestination()`, informações que alimentam as verificações de consentimento e os avisos da CLI. O `RepoContext` separa as exclusões visíveis no prompt (limites de tamanho) das exclusões apenas locais (arquivos sensíveis ou ignorados).
+O `LLMProvider` abstrai os provedores. Cada implementação declara `isRemote()` e `describeDestination()`, informações que alimentam o callback explícito de consentimento do serviço e os avisos da CLI. `--yes` é interpretado somente pela CLI; não faz parte do contrato reutilizável. O `DocumentationResult` não expõe caminhos absolutos nem o conteúdo-fonte bruto, enquanto o `RepoContext` interno separa exclusões visíveis no prompt das exclusões apenas locais.
 
 A descrição detalhada de cada componente e das fronteiras de segurança está em [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -451,6 +456,7 @@ A suíte em `src/test/java/com/docgen` usa JUnit Jupiter e cobre os componentes 
 | `OutputWriterTest` | Escrita segura, sobrescrita e preflight. |
 | `SecretRedactorTest` | Redação de segredos. |
 | `DocGenCLITest` | Fluxo da CLI e consentimento. |
+| `DocumentationServiceTest` | Orquestração, contratos, modos sem provedor, validação e ausência de publicação parcial. |
 | `PromptBuilderTest` | Construção e isolamento dos prompts. |
 | `PromptPreviewWriterTest` | Gravação das pré-visualizações. |
 | `ProviderResponseValidationTest` | Validação das respostas dos provedores. |

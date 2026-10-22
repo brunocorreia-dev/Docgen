@@ -17,6 +17,8 @@ public final class DocGenCLI implements Callable<Integer> {
     static final String README_PROMPT_FILE = "docgen-readme.prompt.txt";
     static final String ARCHITECTURE_PROMPT_FILE = "docgen-architecture.prompt.txt";
 
+    private final DocumentationService documentationService;
+
     @Parameters(index = "0", defaultValue = ".", description = "Repository directory to scan. Defaults to the current directory.")
     private Path repository;
 
@@ -48,6 +50,14 @@ public final class DocGenCLI implements Callable<Integer> {
     @Option(names = {"-y", "--yes"}, description = "Skip the interactive confirmation shown before sending content to a remote provider.")
     private boolean assumeYes;
 
+    public DocGenCLI() {
+        this(new DocumentationService());
+    }
+
+    DocGenCLI(DocumentationService documentationService) {
+        this.documentationService = documentationService;
+    }
+
     public static void main(String[] args) {
         int exitCode = new CommandLine(new DocGenCLI()).execute(args);
         System.exit(exitCode);
@@ -56,56 +66,40 @@ public final class DocGenCLI implements Callable<Integer> {
     @Override
     public Integer call() {
         try {
-            RepoScanner scanner = new RepoScanner();
-            RepoScanner.Options options = RepoScanner.Options.withAllowedExtensions(includeExtensions);
-            RepoContext context = scanner.scan(repository, options);
-
-            System.out.println("Scanning: " + SafeText.forTerminal(context.root().toString()));
-            System.out.println("Files included: " + context.files().size());
+            DocumentationRequest.Operation operation = dryRun
+                    ? DocumentationRequest.Operation.ANALYZE
+                    : previewPrompt
+                    ? DocumentationRequest.Operation.PREVIEW_PROMPTS
+                    : DocumentationRequest.Operation.GENERATE;
+            DocumentationRequest request = new DocumentationRequest(
+                    repository,
+                    output,
+                    operation,
+                    provider,
+                    model,
+                    includeExtensions,
+                    allowRemote,
+                    !dryRun,
+                    force
+            );
+            DocumentationResult result = documentationService.execute(
+                    request,
+                    this::confirmRemoteSend,
+                    new CliProgressListener()
+            );
 
             if (dryRun) {
-                printDryRun(context);
-                return 0;
-            }
-
-            if (context.files().isEmpty()) {
-                System.err.println("Error: no files matched the scan filters; nothing to document. Run with --dry-run to inspect the selection.");
-                return 1;
-            }
-
-            OutputWriter outputWriter = new OutputWriter();
-            if (previewPrompt) {
-                new PromptPreviewWriter().preflight(output, force);
+                printDryRun(result.analysis());
+            } else if (previewPrompt) {
+                printPromptPreviewLocations();
             } else {
-                outputWriter.preflight(output, force);
+                System.out.println("Documentation written to: "
+                        + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             }
-
-            PromptBuilder promptBuilder = new PromptBuilder();
-            String readmePrompt = promptBuilder.buildReadmePrompt(context);
-            String architecturePrompt = promptBuilder.buildArchitecturePrompt(context);
-
-            if (previewPrompt) {
-                writePromptPreviews(readmePrompt, architecturePrompt);
-                return 0;
-            }
-
-            LLMProvider llmProvider = LLMProviderFactory.create(provider, model, allowRemote);
-            if (llmProvider.isRemote() && !confirmRemoteSend(context, llmProvider)) {
-                System.err.println("Aborted: no repository content was sent.");
-                return 1;
-            }
-
-            System.out.println("Generating README.md...");
-            String readme = DocumentationValidator.redactAndValidate(
-                    llmProvider.generateDocumentation(readmePrompt), "README.md");
-            System.out.println("Generating ARCHITECTURE.md...");
-            String architecture = DocumentationValidator.redactAndValidate(
-                    llmProvider.generateDocumentation(architecturePrompt), "ARCHITECTURE.md");
-
-            outputWriter.write(output, readme, architecture, force);
-            System.out.println("Documentation written to: "
-                    + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             return 0;
+        } catch (DocumentationService.RemoteConsentDeniedException denied) {
+            System.err.println("Aborted: no repository content was sent.");
+            return 1;
         } catch (Exception e) {
             System.err.println("Error: " + safeFailureMessage(e));
             return 1;
@@ -129,34 +123,34 @@ public final class DocGenCLI implements Callable<Integer> {
         return SafeText.forTerminal(diagnostic.toString());
     }
 
-    private void printDryRun(RepoContext context) {
+    private void printDryRun(DocumentationResult.RepositoryAnalysis analysis) {
         System.out.println();
         System.out.println("Dry run: showing the selection only. No provider was contacted and no content leaves this machine.");
         System.out.println();
         System.out.println("Included files (content would be redacted, then sent to the selected provider):");
-        if (context.files().isEmpty()) {
+        if (analysis.includedFiles().isEmpty()) {
             System.out.println("  (none)");
         }
-        for (RepoContext.ScannedFile file : context.files()) {
-            System.out.println("  + " + SafeText.forTerminal(file.relativePath().toString().replace('\\', '/'))
-                    + " (" + file.content().length() + " chars" + (file.truncated() ? ", truncated" : "") + ")");
+        for (DocumentationResult.SelectedFile file : analysis.includedFiles()) {
+            System.out.println("  + " + SafeText.forTerminal(file.relativePath())
+                    + " (" + file.characters() + " chars" + (file.truncated() ? ", truncated" : "") + ")");
         }
-        if (!context.skippedFiles().isEmpty()) {
+        if (!analysis.skippedFiles().isEmpty()) {
             System.out.println();
             System.out.println("Skipped by size limits (names are listed inside the prompt, content is not sent):");
-            context.skippedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
+            analysis.skippedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
         }
-        if (!context.excludedFiles().isEmpty()) {
+        if (!analysis.excludedFiles().isEmpty()) {
             System.out.println();
             System.out.println("Excluded (neither name nor content is sent):");
-            context.excludedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
+            analysis.excludedFiles().forEach(item -> System.out.println("  - " + SafeText.forTerminal(item)));
         }
         System.out.println();
-        System.out.println("Total prompt content: " + context.totalCharacters() + " chars from " + context.files().size() + " files.");
+        System.out.println("Total prompt content: " + analysis.totalCharacters() + " chars from "
+                + analysis.includedFiles().size() + " files.");
     }
 
-    private void writePromptPreviews(String readmePrompt, String architecturePrompt) throws Exception {
-        new PromptPreviewWriter().write(output, readmePrompt, architecturePrompt, force);
+    private void printPromptPreviewLocations() {
         Path readmePreview = output.toAbsolutePath().normalize().resolve(README_PROMPT_FILE);
         Path architecturePreview = output.toAbsolutePath().normalize().resolve(ARCHITECTURE_PROMPT_FILE);
         System.out.println("Prompt previews written (no provider was contacted, nothing left this machine):");
@@ -170,12 +164,13 @@ public final class DocGenCLI implements Callable<Integer> {
      * interactive console without --yes, requires an explicit confirmation.
      * Non-interactive runs require --yes as the explicit second consent signal.
      */
-    private boolean confirmRemoteSend(RepoContext context, LLMProvider llmProvider) {
+    private boolean confirmRemoteSend(DocumentationService.RemoteTransmission transmission) {
         System.err.println();
         System.err.println("WARNING: about to send data to "
-                + SafeText.forTerminal(llmProvider.describeDestination()) + ".");
-        System.err.println("Data that leaves this machine: redacted content of " + context.files().size()
-                + " files (" + context.totalCharacters() + " chars), all included file paths, and the names of size-skipped files.");
+                + SafeText.forTerminal(transmission.destination()) + ".");
+        System.err.println("Data that leaves this machine: redacted content of " + transmission.fileCount()
+                + " files (" + transmission.totalCharacters()
+                + " chars), all included file paths, and the names of size-skipped files.");
         System.err.println("A normal run sends two prompts (README and architecture); Groq may make up to three attempts for each prompt after rate-limit or server errors.");
         System.err.println("Secret redaction is best-effort. Use --dry-run or --preview-prompt to inspect first.");
         if (assumeYes) {
@@ -192,5 +187,23 @@ public final class DocGenCLI implements Callable<Integer> {
         }
         String normalized = answer.trim().toLowerCase(Locale.ROOT);
         return normalized.equals("y") || normalized.equals("yes");
+    }
+
+    private final class CliProgressListener implements DocumentationService.ProgressListener {
+        @Override
+        public void repositoryScanned(DocumentationResult.RepositoryAnalysis analysis) {
+            System.out.println("Scanning: "
+                    + SafeText.forTerminal(repository.toAbsolutePath().normalize().toString()));
+            System.out.println("Files included: " + analysis.includedFiles().size());
+        }
+
+        @Override
+        public void generationStarted(DocumentationService.Artifact artifact) {
+            if (artifact == DocumentationService.Artifact.README) {
+                System.out.println("Generating README.md...");
+            } else {
+                System.out.println("Generating ARCHITECTURE.md...");
+            }
+        }
     }
 }
