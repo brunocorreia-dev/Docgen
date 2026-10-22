@@ -33,13 +33,19 @@ jobs:
           java-version: '21'
           verify-signature: true
           cache: maven
-      - name: Test and generate CycloneDX SBOM
+      - name: Test and generate CycloneDX SBOMs
         run: mvn -B verify
-      - name: Upload SBOM
+      - name: Test the web workspace (node:test, no npm dependencies)
+        run: |
+          node --version
+          node --test docgen-web/src/test/js/*.test.mjs
+      - name: Upload SBOMs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docgen-cyclonedx-sbom
-          path: target/docgen.cdx.json
+          path: |
+            target/docgen.cdx.json
+            target/docgen-api.cdx.json
           if-no-files-found: error
           retention-days: 14
 
@@ -104,3 +110,27 @@ jobs:
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           category: /language:java-kotlin
+
+  codeql-javascript:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          category: /language:javascript-typescript

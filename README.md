@@ -2,11 +2,13 @@
 
 # DocGen
 
-**CLI em Java 21 que analisa um repositório de código e gera `README.md` e `ARCHITECTURE.md` com modelos de linguagem, com segurança como padrão.**
+**Plataforma em Java 21 para documentação e planejamento de arquitetura de software assistidos por IA, com segurança como padrão: CLI, API REST e workspace web.**
 
 [![CI](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml/badge.svg)](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
 ![Maven](https://img.shields.io/badge/Maven-3.9%2B-C71A36?logo=apachemaven&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![Frontend](https://img.shields.io/badge/frontend-HTML%20%7C%20CSS%20%7C%20ES%20Modules-7C3AED)
 ![LLM](https://img.shields.io/badge/LLM-Groq%20%7C%20Ollama-4B5563)
 ![SBOM](https://img.shields.io/badge/SBOM-CycloneDX%201.6-0B5FFF)
 ![Assinatura](https://img.shields.io/badge/assinatura-Sigstore-2E2E2E)
@@ -15,6 +17,8 @@
 [Funcionalidades](#principais-funcionalidades) ·
 [Instalação](#instalação) ·
 [Uso](#guia-de-utilização) ·
+[DocGen Web](#docgen-web) ·
+[API REST](#api-rest) ·
 [CLI](#referência-completa-da-cli) ·
 [Segurança](#segurança) ·
 [Arquitetura](#arquitetura-do-projeto) ·
@@ -34,6 +38,8 @@
 - [Instalação](#instalação)
 - [Guia de utilização](#guia-de-utilização)
 - [Referência completa da CLI](#referência-completa-da-cli)
+- [DocGen Web](#docgen-web)
+- [API REST](#api-rest)
 - [Segurança](#segurança)
 - [Configuração da análise](#configuração-da-análise)
 - [Arquitetura do projeto](#arquitetura-do-projeto)
@@ -45,7 +51,7 @@
 
 ## Visão geral
 
-O **DocGen** é uma aplicação de linha de comando que lê um repositório local, seleciona os arquivos de texto relevantes e usa um modelo de linguagem (LLM) para redigir dois documentos:
+O **DocGen** nasceu como uma aplicação de linha de comando que lê um repositório local, seleciona os arquivos de texto relevantes e usa um modelo de linguagem (LLM) para redigir dois documentos:
 
 | Documento | Conteúdo |
 |---|---|
@@ -56,12 +62,15 @@ O **DocGen** é uma aplicação de linha de comando que lê um repositório loca
 
 **A abordagem.** O DocGen automatiza a geração do rascunho e trata o repositório como **dado não confiável** do início ao fim. A IA fica restrita a uma etapa bem delimitada do pipeline: recebe um retrato do repositório com limites rígidos de tamanho, segredos redigidos e conteúdo isolado por delimitadores. A resposta só é gravada em disco depois de passar por validações.
 
+**DocGen Web.** Sobre o mesmo motor, o DocGen agora tem uma API REST (Spring Boot) e um workspace web. Nele você descreve a ideia de um projeto em linguagem natural, anexa PDFs de especificação, recebe da IA uma **proposta estruturada de arquitetura** (componentes, relacionamentos, tecnologias, riscos, decisões e roadmap) com diagrama interativo, revisa e aprova o plano e só então gera, edita e exporta `README.md` e `ARCHITECTURE.md`. A CLI continua independente e com o mesmo comportamento.
+
 **Cenários de uso:**
 
 - gerar um primeiro rascunho de documentação para projetos sem README;
 - revisar ou atualizar a documentação de projetos existentes;
 - documentar código de forma totalmente local, com Ollama, sem enviar dados para fora da máquina;
-- inspecionar com precisão o que seria enviado a um provedor antes de qualquer comunicação remota.
+- inspecionar com precisão o que seria enviado a um provedor antes de qualquer comunicação remota;
+- planejar a arquitetura de um projeto novo a partir de requisitos e PDFs, com revisão humana antes de documentar.
 
 > [!IMPORTANT]
 > O DocGen produz **rascunhos**. A documentação gerada por IA pode conter imprecisões e deve ser revisada por uma pessoa antes de ser publicada.
@@ -87,6 +96,20 @@ O **DocGen** é uma aplicação de linha de comando que lê um repositório loca
 | Validação da documentação gerada | Resposta completa, redigida novamente, limitada em tamanho e restrita a Markdown passivo. |
 | Escrita transacional segura | Os dois arquivos são publicados como um par, com reversão em caso de falha. |
 
+**No DocGen Web:**
+
+| Funcionalidade | Descrição |
+|---|---|
+| Projetos | Criação, edição, listagem e exclusão de projetos a partir de descrição, requisitos funcionais e não funcionais, tecnologias, restrições, provedor, modelo e idioma. |
+| Anexos PDF | Upload com drag-and-drop; extração de texto com Apache PDFBox, redação de segredos e limites rígidos. PDFs digitalizados (OCR) e protegidos por senha não são suportados. |
+| Planejamento arquitetural com IA | Plano estruturado e validado: resumo, objetivos, requisitos (rotulados como seus, inferidos de anexo ou sugeridos pela IA), estilo, componentes, relacionamentos, fluxo de dados, tecnologias, integrações, segurança, persistência, fases, riscos, decisões, premissas e perguntas em aberto. |
+| Diagrama interativo | SVG desenhado a partir do plano, com zoom, pan, navegação por teclado e destaque de conexões; exportação em SVG e em Mermaid validado no servidor. |
+| Revisão humana | Planos nascem como rascunho; a documentação só é gerada a partir de um plano que você aprovou. |
+| Documentação | Geração de README e ARCHITECTURE a partir do plano aprovado, preview Markdown com sumário, edição com validação de Markdown passivo e controle de revisão, download e exportação em ZIP. |
+| Jobs assíncronos | Planejamento e documentação rodam em fila, com estados reais (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`), cancelamento, timeout e histórico. |
+| Consentimento por operação | Antes de enviar algo ao Groq, você vê destino, modelo, tamanho exato e dados incluídos, e autoriza aquela operação específica. |
+| Histórico | Projetos, planos, documentos e jobs persistidos localmente (H2, com migrações Flyway). |
+
 ## Tecnologias utilizadas
 
 | Tecnologia | Versão | Responsabilidade |
@@ -94,14 +117,21 @@ O **DocGen** é uma aplicação de linha de comando que lê um repositório loca
 | Java | 21 | Linguagem e runtime. Usa `java.net.http.HttpClient` e `SecureDirectoryStream` (NIO). |
 | Maven | 3.9+ | Build, testes e empacotamento. |
 | [picocli](https://picocli.info/) | 4.7.7 | Parsing dos argumentos da CLI, `--help` e `--version`. |
-| Jackson Databind | 2.21.5 | Serialização e desserialização JSON nas APIs dos provedores. |
+| Jackson Databind | 2.21.8 (core) · 3.1.5 (API) | JSON nos provedores e no plano (core) e na camada HTTP do Spring Boot (API). |
+| Spring Boot | 4.1.1 | API REST (Spring MVC 7, Spring Security 7, Bean Validation, JDBC). |
+| H2 Database | 2.4.240 | Banco embutido local, em arquivo, num diretório privado. |
+| Flyway | 12.4.0 | Migrações versionadas do esquema. |
+| Apache PDFBox | 3.0.8 | Extração de texto de PDFs, sem renderização. |
+| HTML5, CSS3, ES Modules | — | Workspace web sem framework e sem build, servido pela API. |
+| Node.js (`node:test`) | 20+ | Somente para os testes do frontend; nenhuma dependência npm. |
 | JUnit Jupiter | 6.1.0 | Testes automatizados. |
-| maven-shade-plugin | 3.6.2 | Gera o JAR executável `target/docgen.jar`, com as dependências incluídas. |
-| cyclonedx-maven-plugin | 2.9.2 | Gera o SBOM CycloneDX 1.6 (`target/docgen.cdx.json`) na fase `verify`. |
+| maven-shade-plugin | 3.6.2 | Gera o JAR executável da CLI `target/docgen.jar`, com as dependências incluídas. |
+| spring-boot-maven-plugin | 4.1.1 | Gera `docgen-api/target/docgen-api.jar` (API e workspace web). |
+| cyclonedx-maven-plugin | 2.9.2 | Gera SBOMs CycloneDX 1.6 por artefato (`target/docgen.cdx.json` e `target/docgen-api.cdx.json`) na fase `verify`. |
 | Groq API | — | Provedor de LLM remoto. |
 | Ollama | — | Provedor de LLM local. |
 | GitHub Actions | — | CI, varreduras de segurança e pipeline de release. |
-| CodeQL | — | Análise estática com a suíte `security-extended`. |
+| CodeQL | — | Análise estática de Java e JavaScript com a suíte `security-extended`. |
 | OSV-Scanner | — | Bloqueio de dependências com vulnerabilidades conhecidas. |
 | Dependency Review | — | Revisão das mudanças de dependências em pull requests. |
 | Dependabot | — | Atualização de dependências e das actions fixadas por SHA. |
@@ -188,7 +218,7 @@ cd Docgen
 # 2. Executar os testes
 mvn -B test
 
-# 3. Compilar e gerar o JAR executável (target/docgen.jar)
+# 3. Compilar e gerar os JARs (target/docgen.jar e docgen-api/target/docgen-api.jar)
 mvn -B package
 
 # 4. Executar
@@ -311,6 +341,118 @@ docgen [opções] [<repositório>]
 |---|---|
 | `GROQ_API_KEY` | Chave da API do Groq. **Só** é lida da variável de ambiente, nunca de argumentos da CLI. |
 
+## DocGen Web
+
+O DocGen Web é um workspace local de engenharia assistida por IA: tema escuro, navegação lateral, painéis interativos e foco em revisão humana. Ele roda inteiramente na sua máquina (`127.0.0.1`) e consome a API REST real.
+
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Dashboard do DocGen Web" width="900">
+</p>
+
+| Plano e diagrama | Documentação gerada |
+|---|---|
+| <img src="docs/images/workspace-diagram.png" alt="Diagrama interativo da arquitetura" width="420"> | <img src="docs/images/workspace-docs.png" alt="Revisão da documentação gerada" width="420"> |
+
+> [!IMPORTANT]
+> As telas acima mostram resultados reais de um modelo local (Ollama). Planos e documentos são **propostas da IA** e aparecem sempre identificados como tal. Nada neles foi implementado ou validado.
+
+### Fluxo de trabalho
+
+1. **Novo projeto**: descreva a ideia, os requisitos, as tecnologias preferidas e as restrições, e escolha provedor, modelo e idioma. O botão "Usar exemplo" preenche dados de demonstração, identificados como tal.
+2. **Anexos**: arraste PDFs de especificação. O texto extraído (com segredos redigidos) pode ser conferido em "Ver trecho extraído".
+3. **Analisar e gerar plano**: o job entra na fila; o histórico mostra o estado real e permite cancelar. Com Groq, um diálogo mostra exatamente o que será enviado e pede sua autorização.
+4. **Revisar**: abas Resumo, Arquitetura, Diagrama e Plano. Requisitos mostram a origem (*Informado por você*, *Inferido de anexo pela IA* ou *Sugestão da IA*). Clique em **Revisei e aprovo** quando o plano fizer sentido.
+5. **Documentar**: gere `README.md` e `ARCHITECTURE.md` a partir do plano aprovado, revise no preview, edite (o servidor valida o Markdown passivo) e exporte o ZIP.
+
+### Executar no Arch Linux
+
+```bash
+# Dependências (Java 21+ e Maven; Node.js só para os testes do frontend)
+sudo pacman -S --needed jdk21-openjdk maven nodejs git
+sudo archlinux-java set java-21-openjdk   # se houver mais de um JDK
+
+# Opcional: IA local
+sudo pacman -S --needed ollama
+sudo systemctl enable --now ollama
+ollama pull llama3.2
+
+# Build
+git clone https://github.com/brunocorreia-dev/Docgen.git
+cd Docgen
+mvn -B verify
+
+# Credenciais do workspace (a senha não fica no histórico do shell)
+export DOCGEN_API_USERNAME="$USER"
+read -rs -p "Senha (12+ caracteres): " DOCGEN_API_PASSWORD; echo
+export DOCGEN_API_PASSWORD
+
+# Iniciar a API e o workspace
+./docgen-server
+# Abra http://127.0.0.1:8080 no navegador
+```
+
+Para usar o Groq (remoto), o operador precisa habilitá-lo explicitamente no servidor:
+
+```bash
+export GROQ_API_KEY="..."        # fica só no servidor; o navegador nunca a recebe
+export DOCGEN_ALLOW_REMOTE=true  # sem isso o Groq aparece como desativado
+./docgen-server
+```
+
+### Configuração por variáveis de ambiente
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `DOCGEN_API_USERNAME` | — (obrigatória) | Usuário do workspace (`[A-Za-z0-9._-]{1,64}`). |
+| `DOCGEN_API_PASSWORD` | — (obrigatória) | Senha com 12 a 256 caracteres. |
+| `DOCGEN_API_PORT` | `8080` | Porta. O endereço é sempre `127.0.0.1`. |
+| `DOCGEN_DATA_DIR` | `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` | Diretório privado (`0700`) do banco H2 e do staging de uploads. Precisa ser absoluto. |
+| `DOCGEN_ALLOW_REMOTE` | `false` | Habilita provedores remotos (Groq) no servidor. Cada envio ainda exige consentimento do usuário. |
+| `GROQ_API_KEY` | — | Chave do Groq, lida só pelo servidor. |
+| `DOCGEN_JOB_WORKERS` | `2` | Workers simultâneos de IA. |
+| `DOCGEN_JOB_TIMEOUT` | `15m` | Tempo máximo por job. |
+
+Outros limites (anexos, retenção, sessão) ficam em `docgen-api/src/main/resources/application.yml` e podem ser sobrescritos com as propriedades `docgen.*` do Spring Boot. Repositórios do servidor para o endpoint de análise são autorizados pelo operador como `docgen.repositories.<id>=/caminho/absoluto`.
+
+## API REST
+
+Base: `http://127.0.0.1:8080/api/v1`. Autenticação: `Authorization: Bearer <token>` (obtido em `POST /auth/token`) ou HTTP Basic para scripts. Toda requisição `POST`/`PUT` precisa de `Content-Type: application/json` (ou `application/pdf` no upload).
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$DOCGEN_API_USERNAME\",\"password\":\"$DOCGEN_API_PASSWORD\"}" | jq -r .accessToken)
+
+# Criar um projeto
+PROJECT=$(curl -s -X POST http://127.0.0.1:8080/api/v1/projects \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"API de Estoque","description":"API REST de estoque com Java, Spring Boot e PostgreSQL.","provider":"ollama","model":"llama3.2"}' | jq -r .id)
+
+# Anexar um PDF (corpo bruto; o nome é só para exibição)
+curl -s -X POST "http://127.0.0.1:8080/api/v1/projects/$PROJECT/attachments" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/pdf' \
+  -H 'X-Attachment-Name: especificacao.pdf' --data-binary @especificacao.pdf
+
+# Iniciar o planejamento (202 + job) e acompanhar
+JOB=$(curl -s -X POST "http://127.0.0.1:8080/api/v1/projects/$PROJECT/plans" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' | jq -r .id)
+curl -s "http://127.0.0.1:8080/api/v1/jobs/$JOB" -H "Authorization: Bearer $TOKEN"
+```
+
+| Recurso | Rotas |
+|---|---|
+| Sistema | `GET /health`, `GET /providers` |
+| Sessão | `POST /auth/token`, `GET /auth/session`, `DELETE /auth/token` |
+| Projetos | `POST /projects`, `GET /projects`, `GET/PUT/DELETE /projects/{id}` |
+| Anexos | `POST/GET /projects/{id}/attachments`, `DELETE /projects/{id}/attachments/{attachmentId}` |
+| Consentimento | `POST /projects/{id}/transmission-previews` |
+| Planos | `POST/GET /projects/{id}/plans`, `GET /projects/{id}/plans/{planId}`, `POST /projects/{id}/plans/{planId}/approval` |
+| Documentação | `POST /projects/{id}/documentation`, `GET /artifacts`, `GET /projects/{id}/artifacts`, `GET/PUT /projects/{id}/artifacts/{artifactId}`, `GET …/{artifactId}/content`, `GET /projects/{id}/export` |
+| Jobs | `GET /jobs/{id}`, `POST /jobs/{id}/cancellation`, `GET /projects/{id}/jobs` |
+| Repositórios autorizados | `POST /repositories/{id}/analysis` |
+
+Com provedor remoto, chame primeiro `POST /projects/{id}/transmission-previews` com `{"operation":"PLAN"}` (ou `DOCUMENTATION` e `planId`), revise a resposta e envie o `consentToken` recebido no corpo de `POST /plans` ou `POST /documentation`. Payloads, códigos HTTP e o formato de erro (`{"status","code","message"}`) estão em [ARCHITECTURE.md](ARCHITECTURE.md#contratos-rest-apiv1).
+
 ## Segurança
 
 A segurança é um requisito central do DocGen. O detalhamento completo, incluindo a lista exata de dados enviados, está em [SECURITY.md](SECURITY.md).
@@ -335,6 +477,7 @@ Quando uma condição não pode ser verificada com segurança, como um sistema d
 | **Permissões** | Pré-visualizações de prompt usam permissões restritas ao proprietário quando há atributos POSIX disponíveis. |
 | **Respostas dos modelos** | Corpos de erro são descartados e a leitura é limitada. É obrigatório um marcador de conclusão bem-sucedida (`finish_reason` no Groq, marcador terminal no Ollama). O corpo NDJSON do Ollama é limitado a 16 MiB. A saída é limitada a 2.000.000 caracteres, passa por verificação Unicode e de caracteres de controle, precisa começar com um H1 e usar Markdown passivo: sem HTML bruto, imagens, autolinks ou esquemas de link que não sejam web ou relativos. |
 | **Inspeção** | `--dry-run` e `--preview-prompt` permitem auditar a seleção e os prompts sem cruzar nenhuma fronteira de rede. |
+| **Aplicação web** | Escuta só em `127.0.0.1`, verifica o Host (contra DNS rebinding), não concede CORS, autentica por token Bearer opaco (sem cookies, sem CSRF possível) com bloqueio progressivo contra força bruta, isola todos os recursos por usuário, valida DTOs estritamente, aplica CSP `script-src 'self'` sem `innerHTML` no frontend, processa PDFs em área privada com limites e exige consentimento por operação, amarrado ao conteúdo exato, para qualquer envio remoto. Detalhes em [SECURITY.md](SECURITY.md#aplicação-web-docgen-api--docgen-web). |
 
 ### Limitações dos mecanismos de proteção
 
@@ -411,7 +554,16 @@ Em cada uma das duas requisições: o conteúdo redigido dos arquivos incluídos
 
 ## Arquitetura do projeto
 
-O DocGen mantém a interface CLI separada de um **motor reutilizável** no pacote `com.docgen`:
+O DocGen é um Maven reactor com quatro módulos. As interfaces ficam separadas de um **motor reutilizável** (pacote `com.docgen`), que não depende de HTTP, Servlet, HTML ou terminal:
+
+| Módulo | Conteúdo | Artefato |
+|---|---|---|
+| `docgen-core` | Varredura segura, filtros, redação, prompts, provedores, validação, escrita transacional, planejamento arquitetural e diagramas. | biblioteca |
+| `docgen-cli` | Interface Picocli (parsing, terminal, confirmação, códigos de saída). | `target/docgen.jar` |
+| `docgen-web` | Workspace web (HTML, CSS, ES Modules), sem framework e sem build. | recursos `static/` |
+| `docgen-api` | Spring Boot: REST, autenticação, autorização, uploads, jobs, persistência H2 e Flyway; serve o `docgen-web`. | `docgen-api/target/docgen-api.jar` |
+
+O pipeline da CLI continua o mesmo:
 
 ```text
 DocGenCLI
@@ -431,7 +583,7 @@ DocGenCLI
 
 | Responsabilidade | Classes |
 |---|---|
-| Interface de terminal | `DocGenCLI` |
+| Interface de terminal (`docgen-cli`) | `DocGenCLI` |
 | Contratos e orquestração reutilizável | `DocumentationRequest`, `DocumentationResult`, `DocumentationService` |
 | Leitura do repositório | `RepoScanner`, `RepoContext` |
 | Filtros e segurança | `DocgenIgnore`, `SecretRedactor`, `SafeText` |
@@ -439,6 +591,8 @@ DocGenCLI
 | Integração com provedores | `LLMProvider`, `LLMProviderFactory`, `GroqProvider`, `OllamaProvider`, `HttpExchange`, `DirectProxySelector` |
 | Validação | `DocumentationValidator` |
 | Persistência | `OutputWriter`, `PromptPreviewWriter`, `SecurePairWriter` |
+| Planejamento arquitetural | `ProjectBrief`, `SupportingDocument`, `ArchitecturePlan`, `ArchitecturePlanParser`, `ArchitecturePlanJson`, `ArchitecturePlanningService`, `ProjectDocumentationService`, `ProjectPromptBuilder`, `MermaidDiagram`, `UntrustedText`, `RemoteGate` |
+| API e workspace (`docgen-api`, `docgen-web`) | controllers, serviços, repositórios JDBC, jobs, segurança e as views do frontend; veja [ARCHITECTURE.md](ARCHITECTURE.md#docgen-api) |
 
 O `LLMProvider` abstrai os provedores. Cada implementação declara `isRemote()` e `describeDestination()`, informações que alimentam o callback explícito de consentimento do serviço e os avisos da CLI. `--yes` é interpretado somente pela CLI; não faz parte do contrato reutilizável. O `DocumentationResult` não expõe caminhos absolutos nem o conteúdo-fonte bruto, enquanto o `RepoContext` interno separa exclusões visíveis no prompt das exclusões apenas locais.
 
@@ -448,7 +602,7 @@ A descrição detalhada de cada componente e das fronteiras de segurança está 
 
 ### Estratégia de testes
 
-A suíte em `src/test/java/com/docgen` usa JUnit Jupiter e cobre os componentes críticos de forma isolada:
+A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a Groq ou Ollama: os testes da API substituem o provedor por um duplo programável. Contagem atual: **171** testes no core, **13** na CLI, **48** na API e **44** no frontend.
 
 | Classe de teste | Foco |
 |---|---|
@@ -462,20 +616,29 @@ A suíte em `src/test/java/com/docgen` usa JUnit Jupiter e cobre os componentes 
 | `ProviderResponseValidationTest` | Validação das respostas dos provedores. |
 | `DocumentationValidatorTest` | Contrato de Markdown passivo. |
 | `SafeTextTest` | Utilitários de texto seguro. |
+| `ArchitecturePlanParserTest`, `MermaidDiagramTest`, `ProjectPromptBuilderTest`, `UntrustedTextTest` | Validação do plano, separação entre requisitos do usuário e sugestões da IA, Mermaid restrito, isolamento de prompts e normalização de texto. |
+| `ArchitecturePlanningServiceTest`, `ProjectDocumentationServiceTest`, `ProviderJsonModeTest` | Planejamento, consentimento remoto, falhas de provedor, Markdown inseguro e modo JSON. |
+| `AuthAndSecurityTest` | Tokens, Basic, bloqueio progressivo, Content-Type obrigatório (CSRF), CORS, Host header, CSP e rotas negadas. |
+| `ProjectApiTest`, `AttachmentApiTest` | CRUD, validação estrita, isolamento entre usuários e upload de PDF (válido, falso, criptografado, sem texto, grande demais, duplicado). |
+| `WorkflowApiTest`, `JobTimeoutTest` | Fluxo ponta a ponta (PDF → plano → aprovação → documentação → edição → exportação), consentimento de uso único e obsoleto, falhas saneadas, cancelamento, limites e timeout. |
+| `DocGenApiApplicationTest`, `AuthorizedRepositoryRegistryTest` | Endpoints da Fase 02 e registro de repositórios autorizados. |
+| `docgen-web/src/test/js/*.test.mjs` | DOM seguro, allowlist de URLs, Markdown, layout do diagrama, cliente HTTP, polling, validação, rotas e varredura estática de sinks proibidos. |
 
 ```bash
-mvn -B test     # executa os testes
-mvn -B verify   # testes + geração do SBOM CycloneDX
+mvn -B test                                        # testes Java de todos os módulos
+mvn -B verify                                      # testes + SBOMs CycloneDX
+node --test docgen-web/src/test/js/*.test.mjs      # testes do frontend (Node 20+)
 ```
 
 ### Integração contínua (`ci.yml`)
 
 | Job | Quando | O que faz |
 |---|---|---|
-| `test-and-sbom` | push em `main`, PRs, manual | `mvn -B verify` com Temurin 21 e publicação do SBOM como artefato (retenção de 14 dias). |
+| `test-and-sbom` | push em `main`, PRs, manual | `mvn -B verify` com Temurin 21, testes do frontend com `node --test` e publicação dos SBOMs como artefato (retenção de 14 dias). |
 | `dependency-review` | pull requests | Rejeita dependências com vulnerabilidades de severidade moderada ou superior. |
 | `dependency-scan` | push, PRs, semanal, manual | OSV-Scanner completo. Uma vulnerabilidade faz o job falhar, e o resultado é enviado em SARIF. |
 | `codeql` | push, PRs, manual | CodeQL para Java com a suíte `security-extended`. |
+| `codeql-javascript` | push, PRs, manual | CodeQL para o JavaScript do workspace, com a suíte `security-extended`. |
 
 Práticas adotadas nos workflows:
 
@@ -532,11 +695,28 @@ A verificação bem-sucedida comprova que o JAR foi assinado pela identidade `re
 - **Diretório de saída**: precisa existir previamente e, em POSIX, não pode ter permissão de escrita para grupo ou outros usuários.
 - **Redação best-effort**: formatos de segredo não reconhecidos podem passar despercebidos.
 - **`.docgenignore` sem negação.**
+- **DocGen Web é local**: sessões, consentimentos e o controle de tentativas ficam em memória (reiniciar o servidor encerra as sessões). Não há HTTPS nem suporte a exposição em rede, e o modelo multiusuário é para uso local.
+- **PDFs**: sem OCR (digitalizados são rejeitados), sem PDFs protegidos por senha, até 10 MB, 200 páginas e 200.000 caracteres extraídos por arquivo e 5 anexos por projeto.
+- **Planos da IA**: o parser garante estrutura e limites, não a qualidade das recomendações. Modelos pequenos podem gerar planos rasos ou inconsistentes; a aprovação humana é obrigatória antes da documentação.
+- **Release**: apenas a CLI (`docgen.jar`) é publicada e assinada; o JAR da API é gerado localmente.
 - **Local x remoto**: com Groq, o conteúdo redigido sai da máquina com destino a `api.groq.com`. Com Ollama, permanece no loopback local, mas exige o serviço e o modelo instalados localmente. Os timeouts de requisição são de 5 minutos no Groq e 10 minutos no Ollama.
 
 ## Evolução do projeto
 
-Não há um roadmap oficial publicado no repositório. O DocGen está sujeito a melhorias futuras, que serão documentadas nesta seção conforme forem implementadas.
+Histórico recente:
+
+1. **Fase 01**: extração do `DocumentationService` reutilizável.
+2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
+3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
+
+Próximos passos considerados (ainda não implementados):
+
+- publicar e assinar o JAR da API nas releases, com SBOM próprio;
+- OCR opcional para PDFs digitalizados, em processo isolado;
+- documentação de repositórios autorizados pelo workspace (hoje a API só faz a análise sem IA);
+- edição estruturada do plano antes da aprovação e comparação entre versões;
+- notificações por SSE quando os jobs ficarem mais longos;
+- testes de navegador automatizados na CI (hoje executados localmente com Chromium headless).
 
 Sugestões e relatos de problemas podem ser enviados pelas [issues do repositório](https://github.com/brunocorreia-dev/Docgen/issues). Para questões de segurança, siga as orientações de [SECURITY.md](SECURITY.md).
 

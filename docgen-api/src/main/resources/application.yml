@@ -1,0 +1,60 @@
+server:
+  # Loopback only. Exposing DocGen on other interfaces is unsupported (see SECURITY.md).
+  address: 127.0.0.1
+  port: ${DOCGEN_API_PORT:8080}
+  error:
+    include-exception: false
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+  tomcat:
+    max-swallow-size: 1MB
+    max-http-form-post-size: 0
+
+spring:
+  application:
+    name: docgen-api
+  main:
+    banner-mode: "off"
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      # Uploads are raw application/pdf bodies streamed to a private staging file.
+      enabled: false
+  flyway:
+    locations: classpath:db/migration
+
+logging:
+  level:
+    # PDFBox logs font and parsing details derived from uploaded documents.
+    org.apache.pdfbox: ERROR
+    org.apache.fontbox: ERROR
+
+docgen:
+  api:
+    username: ${DOCGEN_API_USERNAME:}
+    password: ${DOCGEN_API_PASSWORD:}
+  repositories: {}
+  storage:
+    data-directory: ${DOCGEN_DATA_DIR:}
+    in-memory: false
+  remote:
+    # Operator gate for remote providers (Groq). Users must still consent per operation.
+    enabled: ${DOCGEN_ALLOW_REMOTE:false}
+  jobs:
+    workers: ${DOCGEN_JOB_WORKERS:2}
+    queue-capacity: 16
+    max-active-per-user: 3
+    timeout: ${DOCGEN_JOB_TIMEOUT:15m}
+  attachments:
+    max-bytes: 10485760
+    max-pages: 200
+    max-characters: 200000
+    max-per-project: 5
+    retention: 30d
+  auth:
+    token-ttl: 8h
+    idle-timeout: 30m
+    consent-ttl: 10m

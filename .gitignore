@@ -4,6 +4,7 @@ target/
 *.war
 *.ear
 dependency-reduced-pom.xml
+node_modules/
 
 # IDE and operating-system state
 .idea/
