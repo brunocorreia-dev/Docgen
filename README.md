@@ -208,6 +208,16 @@ O script `install.sh`:
 
 As duas últimas variáveis são mutuamente exclusivas. Sem o cosign, o instalador continua apenas com o checksum e exibe um aviso.
 
+### Instalação do DocGen Web por release (v2.0.0+)
+
+O DocGen Web tem um instalador próprio. O `install.sh` continua instalando só a CLI, como antes.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/Docgen/main/install-web.sh | sh
+```
+
+O `install-web.sh` aplica as mesmas verificações do `install.sh` (HTTPS, checksum estrito, Sigstore com `cosign` e as variáveis `INSTALL_DIR`, `DOCGEN_REQUIRE_SIGNATURE` e `DOCGEN_SKIP_SIGNATURE`), mas baixa `docgen-api.jar` e instala o wrapper `docgen-web`. O frontend vem embutido no JAR e é servido pelo próprio Spring Boot.
+
 ### Compilação pelo código-fonte
 
 ```bash
@@ -335,7 +345,7 @@ docgen [opções] [<repositório>]
 | `-o`, `--output <dir>` | Opcional | Diretório de saída, que precisa existir. Padrão: diretório atual (`.`). | `-o ./generated` |
 | `--force` | Opcional | Permite sobrescrever documentação ou pré-visualizações existentes. | `--force` |
 | `-h`, `--help` | Opcional | Exibe a ajuda. | `--help` |
-| `-V`, `--version` | Opcional | Exibe a versão (`docgen 1.0.0`). | `--version` |
+| `-V`, `--version` | Opcional | Exibe a versão (`docgen 2.0.0`). | `--version` |
 
 | Variável de ambiente | Uso |
 |---|---|
@@ -365,6 +375,19 @@ O DocGen Web é um workspace local de engenharia assistida por IA: tema escuro, 
 5. **Documentar**: gere `README.md` e `ARCHITECTURE.md` a partir do plano aprovado, revise no preview, edite (o servidor valida o Markdown passivo) e exporte o ZIP.
 
 ### Executar no Arch Linux
+
+Pela release (sem compilar):
+
+```bash
+sudo pacman -S --needed jre21-openjdk curl cosign   # cosign é opcional, mas recomendado
+curl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/Docgen/main/install-web.sh | sh
+export DOCGEN_API_USERNAME="$USER"
+read -rs -p "Senha (12+ caracteres): " DOCGEN_API_PASSWORD; echo
+export DOCGEN_API_PASSWORD
+~/.local/bin/docgen-web   # abra http://127.0.0.1:8080
+```
+
+Pelo código-fonte:
 
 ```bash
 # Dependências (Java 21+ e Maven; Node.js só para os testes do frontend)
@@ -655,17 +678,23 @@ O workflow `release.yml` é executado ao publicar uma GitHub Release e está res
 
 1. **`dependency-scan`**: OSV-Scanner sobre o commit imutável da release.
 2. **`build-artifacts`**: depende de uma varredura limpa. Executa `mvn -B verify` e gera os checksums SHA-256, com permissão apenas de `contents: read`.
-3. **`sign-and-upload`**: job separado, sem checkout nem execução do Maven, que recebe somente os artefatos já construídos. Assina os quatro arquivos com **cosign keyless** via GitHub Actions OIDC e os envia para a release.
+3. **`sign-and-upload`**: job separado, sem checkout nem execução do Maven, que recebe somente os artefatos já construídos. Assina cada artefato e cada checksum com **cosign keyless** via GitHub Actions OIDC e os envia para a release.
+
+Antes dos checksums, o job de build executa `java -jar target/docgen.jar --version` e confirma que o `docgen-api.jar` contém o frontend (`docgen-web`).
 
 **Artefatos publicados:**
 
 | Arquivo | Descrição |
 |---|---|
-| `docgen.jar` | JAR executável. |
+| `docgen.jar` | JAR executável da CLI (nome inalterado). |
 | `docgen.jar.sha256` | Checksum SHA-256 do JAR. |
-| `docgen.cdx.json` | SBOM CycloneDX 1.6. |
+| `docgen.cdx.json` | SBOM CycloneDX 1.6 da CLI. |
 | `docgen.cdx.json.sha256` | Checksum do SBOM. |
-| `*.sigstore.json` | Bundle Sigstore de cada um dos quatro arquivos acima. |
+| `docgen-api.jar` | JAR Spring Boot da API REST com o workspace web embutido (v2.0.0+). |
+| `docgen-api.jar.sha256` | Checksum do JAR da API. |
+| `docgen-api.cdx.json` | SBOM CycloneDX 1.6 da API. |
+| `docgen-api.cdx.json.sha256` | Checksum do SBOM da API. |
+| `*.sigstore.json` | Bundle Sigstore de cada um dos arquivos acima. |
 
 ### Verificação manual de uma release
 

@@ -140,3 +140,7 @@ Abra um security advisory privado ou contate o proprietário do repositório ant
 - **A aplicação web é local e de baixa escala.** Sessões, consentimentos e o controle de tentativas ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token web fica no `sessionStorage` da aba, então um XSS poderia lê-lo; a CSP estrita e a ausência de sinks HTML são as mitigações.
 - **PDFs:** sem OCR; o texto pode sair fora de ordem em layouts complexos; o limite de 200.000 caracteres trunca documentos longos, e isso é sinalizado na interface.
 - **A verificação de assinatura é tão forte quanto o workflow.** A assinatura keyless autentica a identidade do `release.yml` e a tag; a garantia de que os bytes assinados vieram do build depende de revisar esse workflow. Ela não comprova a ausência de código malicioso no repositório naquela tag.
+
+## Distribuição (v2.0.0+)
+
+As releases publicam dois JARs independentes: `docgen.jar` (CLI) e `docgen-api.jar` (API REST + workspace web). Cada JAR e cada SBOM CycloneDX tem checksum SHA-256 e bundle Sigstore keyless, assinados pelo workflow `release.yml` em uma tag. `install.sh` instala apenas a CLI; `install-web.sh` instala apenas o DocGen Web, com as mesmas verificações de checksum e assinatura.

@@ -243,3 +243,14 @@ A CI executa:
 - varredura OSV completa, também semanal.
 
 O workflow de release está restrito a `brunocorreia-dev/Docgen`. A varredura e o build usam o commit imutável do evento de release; o build depende de uma varredura OSV limpa, roda `mvn verify` e gera checksums do JAR e do SBOM da CLI num job limitado a `contents: read`. Um job separado baixa esses artefatos, não faz checkout nem executa o Maven, e é o único que recebe `id-token: write` e `contents: write` para assinar os quatro arquivos com cosign keyless via OIDC do GitHub Actions e publicá-los com os bundles `*.sigstore.json`. Todas as actions externas estão fixadas por SHA completo. O `install.sh` baixa a release mais recente, sempre verifica o checksum do JAR com parsing estrito e, quando o cosign está presente, verifica as assinaturas do JAR e do checksum contra a identidade do workflow de release numa tag. O JAR da API ainda **não** é publicado em releases (veja a seção de evolução no README).
+
+## Empacotamento e distribuição
+
+| Módulo | Artefato | Conteúdo |
+|---|---|---|
+| `docgen-core` | (biblioteca) | Varredura, prompts, provedores, planejamento e validação. |
+| `docgen-cli` | `target/docgen.jar` | CLI shaded (picocli). Instalada por `install.sh`. |
+| `docgen-web` | `docgen-web-<versão>.jar` | Recursos estáticos (`static/`) do workspace. |
+| `docgen-api` | `docgen-api/target/docgen-api.jar` | Spring Boot executável que inclui `docgen-web` em `BOOT-INF/lib` e serve o frontend na mesma origem da API. Instalado por `install-web.sh`. |
+
+O workflow `release.yml` constrói os dois JARs, gera SBOM e checksum de cada um e os assina com Sigstore em um job separado.

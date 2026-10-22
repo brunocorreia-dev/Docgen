@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Callable;
 
-@Command(name = "docgen", mixinStandardHelpOptions = true, version = "docgen 1.0.0",
+@Command(name = "docgen", mixinStandardHelpOptions = true, version = "docgen 2.0.0",
         description = "Generate README.md and ARCHITECTURE.md from a repository snapshot.")
 public final class DocGenCLI implements Callable<Integer> {
     static final String README_PROMPT_FILE = DocumentationArtifacts.README_PROMPT;
