@@ -2,7 +2,7 @@
 
 # DocGen
 
-**Plataforma em Java 21 para documentação e planejamento de arquitetura de software assistidos por IA, com segurança como padrão: CLI, API REST e workspace web.**
+**Plataforma em Java 21 para documentação e planejamento de arquitetura de software assistidos por IA, com segurança como padrão: CLI, API REST, workspace web e aplicativo desktop local.**
 
 [![CI](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml/badge.svg)](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
@@ -18,6 +18,7 @@
 [Instalação](#instalação) ·
 [Uso](#guia-de-utilização) ·
 [DocGen Web](#docgen-web) ·
+[Desktop](#docgen-desktop) ·
 [API REST](#api-rest) ·
 [CLI](#referência-completa-da-cli) ·
 [Segurança](#segurança) ·
@@ -39,6 +40,7 @@
 - [Guia de utilização](#guia-de-utilização)
 - [Referência completa da CLI](#referência-completa-da-cli)
 - [DocGen Web](#docgen-web)
+- [DocGen Desktop](#docgen-desktop)
 - [API REST](#api-rest)
 - [Segurança](#segurança)
 - [Configuração da análise](#configuração-da-análise)
@@ -437,6 +439,32 @@ export DOCGEN_ALLOW_REMOTE=true  # sem isso o Groq aparece como desativado
 
 Outros limites (anexos, retenção, sessão) ficam em `docgen-api/src/main/resources/application.yml` e podem ser sobrescritos com as propriedades `docgen.*` do Spring Boot. Repositórios do servidor para o endpoint de análise são autorizados pelo operador como `docgen.repositories.<id>=/caminho/absoluto`.
 
+## DocGen Desktop
+
+> Seu assistente local e gratuito. Sua IA. Seu computador. Suas regras.
+
+O DocGen Desktop abre o DocGen Web sem comandos de terminal: um launcher nativo (Swing, sem frameworks
+adicionais) inicia a API em `127.0.0.1`, comprova que a API que responde é o processo que ele iniciou e abre
+o workspace no navegador. O pacote Linux traz o próprio runtime Java.
+
+```bash
+mvn -B verify
+packaging/linux/build-app-image.sh --jdk /caminho/para/jdk-21-ou-superior
+packaging/linux/install-user.sh target/desktop/dist/DocGen     # menu de aplicativos, sem root
+```
+
+- **Sem senha:** em vez de exibir uma senha temporária, o navegador mostra um código e a janela do DocGen
+  pede que você confirme o mesmo código. Nada sensível vai na URL.
+- **Identidade verificada:** o segredo de cada inicialização chega à API só pelo stdin; a API anuncia a porta
+  por um canal autenticado e responde a um desafio HMAC. Um serviço estranho na porta nunca é usado.
+- **Encerramento limpo:** "Encerrar" (ou fechar a janela) finaliza o backend; se o launcher morrer, a API
+  percebe e encerra sozinha.
+- **Estado:** Linux implementado e verificado; `.deb`/`.rpm` preparados e não verificados; Windows e macOS
+  planejados.
+
+Documentação: [arquitetura](docs/desktop/ARCHITECTURE.md) · [instalação](docs/desktop/INSTALLATION.md) ·
+[desenvolvimento](docs/desktop/DEVELOPMENT.md) · [solução de problemas](docs/desktop/TROUBLESHOOTING.md).
+
 ## API REST
 
 Base: `http://127.0.0.1:8080/api/v1`. Autenticação: `Authorization: Bearer <token>` (obtido em `POST /auth/token`) ou HTTP Basic para scripts. Toda requisição `POST`/`PUT` precisa de `Content-Type: application/json` (ou `application/pdf` no upload).
@@ -577,7 +605,7 @@ Em cada uma das duas requisições: o conteúdo redigido dos arquivos incluídos
 
 ## Arquitetura do projeto
 
-O DocGen é um Maven reactor com quatro módulos. As interfaces ficam separadas de um **motor reutilizável** (pacote `com.docgen`), que não depende de HTTP, Servlet, HTML ou terminal:
+O DocGen é um Maven reactor com seis módulos. As interfaces ficam separadas de um **motor reutilizável** (pacote `com.docgen`), que não depende de HTTP, Servlet, HTML ou terminal:
 
 | Módulo | Conteúdo | Artefato |
 |---|---|---|
@@ -585,6 +613,8 @@ O DocGen é um Maven reactor com quatro módulos. As interfaces ficam separadas 
 | `docgen-cli` | Interface Picocli (parsing, terminal, confirmação, códigos de saída). | `target/docgen.jar` |
 | `docgen-web` | Workspace web (HTML, CSS, ES Modules), sem framework e sem build. | recursos `static/` |
 | `docgen-api` | Spring Boot: REST, autenticação, autorização, uploads, jobs, persistência H2 e Flyway; serve o `docgen-web`. | `docgen-api/target/docgen-api.jar` |
+| `docgen-desktop-protocol` | Protocolo autenticado launcher ↔ API (segredo de sessão, mensagens HMAC, prova de prontidão), só JDK. | biblioteca |
+| `docgen-launcher` | Aplicativo desktop (Swing): diagnóstico, ciclo de vida do backend, verificação de identidade, pareamento do navegador. | `docgen-launcher/target/docgen-launcher.jar` |
 
 O pipeline da CLI continua o mesmo:
 
@@ -625,7 +655,7 @@ A descrição detalhada de cada componente e das fronteiras de segurança está 
 
 ### Estratégia de testes
 
-A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a Groq ou Ollama: os testes da API substituem o provedor por um duplo programável. Contagem atual: **171** testes no core, **13** na CLI, **48** na API e **44** no frontend.
+A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a Groq ou Ollama: os testes da API substituem o provedor por um duplo programável. Contagem atual: **171** testes no core, **13** na CLI, **79** na API, **10** no protocolo desktop, **104** no launcher e **51** no frontend. Os testes do launcher iniciam processos reais (um backend simulado e, quando o `docgen-api.jar` foi empacotado no mesmo build, a API verdadeira).
 
 | Classe de teste | Foco |
 |---|---|
@@ -728,6 +758,7 @@ A verificação bem-sucedida comprova que o JAR foi assinado pela identidade `re
 - **PDFs**: sem OCR (digitalizados são rejeitados), sem PDFs protegidos por senha, até 10 MB, 200 páginas e 200.000 caracteres extraídos por arquivo e 5 anexos por projeto.
 - **Planos da IA**: o parser garante estrutura e limites, não a qualidade das recomendações. Modelos pequenos podem gerar planos rasos ou inconsistentes; a aprovação humana é obrigatória antes da documentação.
 - **Release**: apenas a CLI (`docgen.jar`) é publicada e assinada; o JAR da API é gerado localmente.
+- **DocGen Desktop**: somente o Linux foi verificado (Windows e macOS ainda não são suportados); o pacote é gerado localmente e ainda não é publicado nem assinado; o pareamento depende de a pessoa conferir o código antes de autorizar. Veja [SECURITY.md](SECURITY.md#modo-desktop-docgen-launcher).
 - **Local x remoto**: com Groq, o conteúdo redigido sai da máquina com destino a `api.groq.com`. Com Ollama, permanece no loopback local, mas exige o serviço e o modelo instalados localmente. Os timeouts de requisição são de 5 minutos no Groq e 10 minutos no Ollama.
 
 ## Evolução do projeto
@@ -737,6 +768,7 @@ Histórico recente:
 1. **Fase 01**: extração do `DocumentationService` reutilizável.
 2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
 3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
+4. **DocGen Desktop**: launcher nativo, verificação de identidade do backend, pareamento sem senha e pacote Linux com runtime próprio.
 
 Próximos passos considerados (ainda não implementados):
 

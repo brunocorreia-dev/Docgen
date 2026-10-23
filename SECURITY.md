@@ -106,6 +106,67 @@ O CSRF depende de o navegador anexar credenciais automaticamente. Aqui, nenhuma 
 - Respostas de erro têm códigos estáveis e mensagens fixas; `server.error.include-*` está desativado e exceções nunca são ecoadas.
 - Falhas de jobs são classificadas por tipo. O log registra só o código e a classe da exceção, nunca prompts, conteúdo de PDFs, respostas de provedores ou tokens.
 
+## Modo desktop (docgen-launcher)
+
+O launcher desktop inicia a API como processo filho e substitui a senha por um pareamento confirmado na
+janela. Detalhes em [docs/desktop/ARCHITECTURE.md](docs/desktop/ARCHITECTURE.md).
+
+### Isolamento e identidade do backend
+
+- A API continua presa a `127.0.0.1`; em modo desktop, um endereço que não seja de loopback faz a API
+  recusar a inicialização. O launcher passa `--server.address=127.0.0.1` explicitamente.
+- O modo desktop só é ativado pelo launcher (`--docgen.desktop.enabled=true`) e exige um segredo de sessão
+  de 256 bits, novo a cada inicialização, entregue **somente pelo stdin** do processo filho: nunca em
+  argumentos (visíveis em `ps`), variáveis de ambiente, arquivos, URLs ou HTTP. Sem esse segredo em 30 s,
+  a API não sobe.
+- Do segredo derivam chaves HMAC-SHA256 separadas para prontidão, eventos e comandos. Eventos (stdout) e
+  comandos (stdin) levam MAC e número de sequência crescente: linhas forjadas, reenviadas ou reordenadas são
+  descartadas sem ser ecoadas.
+- `/api/v1/health` não prova nada. O launcher só usa a porta anunciada depois que a API responde, em
+  `POST /api/v1/desktop/handshake`, um MAC sobre um nonce novo vinculado à sessão, ao pid e à porta local da
+  conexão, verificado em tempo constante. Cada nonce é respondido uma vez; requisições com `Origin` ou
+  `Sec-Fetch-Site` (navegadores) são recusadas.
+- Por padrão a própria API escolhe uma porta efêmera e a anuncia, sem a corrida "testar porta livre → outro
+  processo ocupa". Com porta fixa, uma porta que já responde nunca é tratada como DocGen.
+- O launcher só encerra o processo que iniciou e os descendentes dele (linha de vida no stdin, depois
+  SIGTERM, depois kill). Se o launcher morrer, o EOF no stdin encerra a API.
+
+### Autenticação sem senha
+
+- Em modo desktop a senha configurada é trocada por um valor aleatório que só existe na memória da API, então
+  login por senha e HTTP Basic ficam inutilizáveis (inclusive com `DOCGEN_API_PASSWORD` no ambiente, que o
+  launcher também remove). `docgen.api.additional-users` faz a inicialização falhar.
+- O navegador recebe um token Bearer comum (mesmas regras de expiração, `sessionStorage` e revogação) somente
+  depois do pareamento: "Abrir DocGen" arma a API por 2 minutos para **um** pedido; a página do workspace
+  cria o pedido com `fetch` JSON same-origin (`Origin` igual ao `Host` permitido e `X-DocGen-Client`) e recebe
+  um segredo de consulta que fica só na memória da aba; a janela do launcher mostra o mesmo código
+  `XXXX-XXXX` e só envia `APPROVE` com o código exibido.
+- Falha fechada: pedidos sem armar são recusados; dois pedidos simultâneos cancelam ambos e desarmam; três
+  segredos de consulta errados cancelam o pedido; pedidos expiram em 2 minutos; o token é entregue uma vez.
+  Nenhum token, senha ou segredo vai para URL, disco, log ou arquivo estático, e nenhuma regra de CORS foi
+  adicionada.
+- Outras páginas não conseguem pedir nem ler nada: as rotas exigem tipo de conteúdo não simples, cabeçalho
+  próprio e `Origin` igual ao host (preflight CORS nunca é concedido), e o `HostHeaderFilter` continua
+  bloqueando DNS rebinding. Mesmo um processo local que crie um pedido não recebe sessão sem a confirmação
+  na janela.
+
+### Logs do launcher
+
+`launcher.log` e `backend.log` ficam no diretório de estado do usuário (0700, arquivos 0600 criados sem seguir
+links), com limite de tamanho e redação do segredo exato da sessão, de tokens Bearer/Basic e de atribuições
+de credenciais. A janela nunca mostra stack traces.
+
+### Limitações do modo desktop
+
+- Processos da **mesma conta** do sistema continuam fora do modelo de ameaça: eles já podem ler o banco H2
+  do usuário e, em sistemas que permitem, inspecionar processos dele. Os MACs dos comandos dificultam a
+  injeção pelo `/proc/<pid>/fd/0`, mas não são uma barreira contra código malicioso do próprio usuário.
+- O pareamento depende de a pessoa comparar o código. Se um processo local criar um pedido enquanto o
+  navegador não abriu e a pessoa autorizar sem conferir, esse processo recebe a sessão.
+- O token continua no `sessionStorage` da aba (como no login normal); a CSP estrita e a ausência de sinks HTML
+  são as mitigações contra XSS.
+- O pacote desktop ainda não é assinado; o `.sha256` detecta só corrupção.
+
 ## Integridade de releases
 
 As releases publicam `docgen.jar`, um SBOM CycloneDX 1.6 (`docgen.cdx.json`), checksums SHA-256 e bundles Sigstore (`*.sigstore.json`) para os quatro arquivos. A assinatura é keyless, feita pelo workflow de release via OIDC do GitHub Actions. O instalador baixa os artefatos da release mais recente de `brunocorreia-dev/Docgen`, interpreta e verifica estritamente o checksum do JAR e, quando o cosign está disponível, verifica as assinaturas do JAR e do checksum contra a identidade do workflow de release numa tag. `DOCGEN_REQUIRE_SIGNATURE=1` torna o cosign obrigatório; `DOCGEN_SKIP_SIGNATURE=1` dispensa explicitamente a verificação de proveniência.

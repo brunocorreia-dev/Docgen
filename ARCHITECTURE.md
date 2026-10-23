@@ -1,6 +1,6 @@
 # Arquitetura
 
-O DocGen é um Maven reactor com quatro módulos. O núcleo (`docgen-core`) concentra as regras de varredura, segurança, prompts, provedores e validação, e não depende de HTTP, Servlet, HTML ou terminal. As interfaces (CLI e API/Web) apenas adaptam entradas e saídas para esse núcleo.
+O DocGen é um Maven reactor com seis módulos. O núcleo (`docgen-core`) concentra as regras de varredura, segurança, prompts, provedores e validação, e não depende de HTTP, Servlet, HTML ou terminal. As interfaces (CLI e API/Web) apenas adaptam entradas e saídas para esse núcleo; o launcher desktop inicia a API como processo filho e não depende do núcleo.
 
 ```text
 docgen/
@@ -8,7 +8,9 @@ docgen/
 ├── docgen-core/       motor reutilizável (Java 21 + Jackson 2)
 ├── docgen-cli/        interface Picocli → target/docgen.jar (shaded)
 ├── docgen-web/        workspace web estático (HTML, CSS, ES Modules) → classpath:/static
-└── docgen-api/        Spring Boot 4.1 (REST, segurança, jobs, H2, PDFBox) → docgen-api.jar
+├── docgen-desktop-protocol/  protocolo autenticado launcher ↔ API (só JDK)
+├── docgen-api/        Spring Boot 4.1 (REST, segurança, jobs, H2, PDFBox) → docgen-api.jar
+└── docgen-launcher/   aplicativo desktop (Swing, só JDK) → docgen-launcher.jar; empacotado por packaging/linux
 ```
 
 ```mermaid
@@ -20,9 +22,11 @@ flowchart LR
     CORE -->|"HTTPS"| GROQ["Groq API"]
     CORE -->|"HTTP loopback"| OLLAMA["Ollama 127.0.0.1:11434"]
     API --> H2[("H2 embutido<br/>~/.local/share/docgen")]
+    LAUNCHER["docgen-launcher<br/>Swing"] -->|"processo filho + stdin/stdout HMAC"| API
+    LAUNCHER -->|"abre #/desktop"| WEB
 ```
 
-Dependências entre módulos: `docgen-cli → docgen-core`; `docgen-api → docgen-core` e `docgen-api → docgen-web` (somente em runtime). A CLI não conhece a API, o Spring ou o PDFBox, e o SBOM dela continua listando apenas o core, Jackson e Picocli.
+Dependências entre módulos: `docgen-cli → docgen-core`; `docgen-api → docgen-core`, `docgen-api → docgen-desktop-protocol` e `docgen-api → docgen-web` (somente em runtime); `docgen-launcher → docgen-desktop-protocol`. O launcher não depende da API em tempo de compilação: ele executa o `docgen-api.jar`. A arquitetura do desktop está em [docs/desktop/ARCHITECTURE.md](docs/desktop/ARCHITECTURE.md). A CLI não conhece a API, o Spring ou o PDFBox, e o SBOM dela continua listando apenas o core, Jackson e Picocli.
 
 ## docgen-core
 
@@ -128,6 +132,10 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | `POST /auth/token` | pública | `{username, password}` → `{accessToken, tokenType, expiresAt, username}`. | 200 |
 | `GET /auth/session` | sim | Usuário da sessão. | 200 |
 | `DELETE /auth/token` | sim | Revoga o token atual. | 204 |
+| `GET /desktop/status` | pública, só no modo desktop | `{mode: "desktop"}`; a tela de login vira pareamento. | 200 |
+| `POST /desktop/handshake` | prova HMAC, só no modo desktop | `{nonce}` → `{protocol, proof}` para o launcher; navegadores (com `Origin`) são recusados; nonce de uso único. | 200 |
+| `POST /desktop/pairings` | same-origin, só no modo desktop | Cria o pedido de pareamento (exige ARM do launcher) → `{pairingId, pollSecret, code, expiresAt}`. | 201 |
+| `POST /desktop/pairings/{id}/token` | segredo de consulta, só no modo desktop | `{pollSecret}` → 202 pendente, 200 token Bearer (uma vez), 403 recusado, 410 expirado. | 200 |
 | `POST /repositories/{id}/analysis` | sim | Análise (sem IA) de um repositório autorizado no servidor. | 200 |
 | `POST /projects` · `GET /projects` | sim | Cria ou lista os projetos do usuário (lista com estatísticas). | 201 · 200 |
 | `GET` · `PUT` · `DELETE /projects/{id}` | sim | Detalhe, atualização e exclusão (cancela os jobs do projeto). | 200 · 200 · 204 |
@@ -145,7 +153,7 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | `GET /projects/{id}/artifacts/{artifactId}/content` | sim | Download com nome fixo. | 200 |
 | `GET /projects/{id}/export?planId=` | sim | ZIP com `README.md`, `ARCHITECTURE.md`, `architecture.mmd` e `architecture-plan.json`. | 200 |
 
-Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `invalid_credentials`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`consent_required`, `consent_invalid`, `consent_stale`, `remote_disabled`, `plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`) e 429 (`too_many_attempts`, `too_many_jobs`, `queue_full`).
+Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `invalid_credentials`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`consent_required`, `consent_invalid`, `consent_stale`, `remote_disabled`, `plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`) e 429 (`too_many_attempts`, `too_many_jobs`, `queue_full`). Somente no modo desktop: 403 (`origin_rejected`, `pairing_denied`), 409 (`nonce_reused`, `pairing_unavailable`, `pairing_conflict`) e 410 (`pairing_expired`).
 
 ### Jobs assíncronos
 

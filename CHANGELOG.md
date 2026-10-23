@@ -2,6 +2,21 @@
 
 Todas as mudanças relevantes deste projeto. O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **DocGen Desktop** (`docgen-launcher`): aplicativo Swing que verifica o ambiente (`--diagnose`), inicia a API como processo filho em `127.0.0.1`, comprova a identidade dela e abre o workspace no navegador; modo headless `--check` para smoke tests.
+- Protocolo `docgen-desktop/1` (`docgen-desktop-protocol`): segredo por inicialização entregue só pelo stdin, eventos e comandos com HMAC e sequência, prova de prontidão HTTP vinculada a nonce, pid e porta.
+- Modo desktop da API (`docgen.desktop.enabled`, ativado só pelo launcher): sem login por senha, rotas `/api/v1/desktop/*` e pareamento do navegador confirmado na janela do launcher.
+- Tela de pareamento no DocGen Web (`#/desktop`).
+- Empacotamento Linux com `jlink` + `jpackage` (`packaging/linux/build-app-image.sh`) e instalação por usuário com entrada de menu (`packaging/linux/install-user.sh`).
+- Documentação em `docs/desktop/`.
+
+### Compatibilidade
+
+- `docgen-server`, a CLI e o login por senha do DocGen Web não mudam; as rotas desktop não existem fora do modo desktop.
+
 ## [2.0.0] - não publicada
 
 ### Adicionado
