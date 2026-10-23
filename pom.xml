@@ -15,6 +15,7 @@
         <module>docgen-core</module>
         <module>docgen-cli</module>
         <module>docgen-web</module>
+        <module>docgen-desktop-protocol</module>
         <module>docgen-api</module>
         <!-- Declared after docgen-api so a full reactor build packages the API jar first. -->
         <module>docgen-launcher</module>
