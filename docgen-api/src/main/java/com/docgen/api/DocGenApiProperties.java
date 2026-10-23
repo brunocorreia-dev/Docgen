@@ -39,7 +39,7 @@ public record DocGenApiProperties(
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
         auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
-        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(false, null));
+        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(false, null, null, null));
     }
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
@@ -116,10 +116,14 @@ public record DocGenApiProperties(
      * per-launch session secret to the process on stdin (see {@link DesktopLauncherLink}).
      *
      * @param bootstrapTimeout how long to wait for the launcher's session line before failing
+     * @param armWindow        how long after "Abrir DocGen" one browser may request a pairing
+     * @param pairingTtl       how long a pairing request waits for the user's confirmation
      */
-    public record Desktop(boolean enabled, Duration bootstrapTimeout) {
+    public record Desktop(boolean enabled, Duration bootstrapTimeout, Duration armWindow, Duration pairingTtl) {
         public Desktop {
             bootstrapTimeout = bootstrapTimeout == null ? Duration.ofSeconds(30) : bootstrapTimeout;
+            armWindow = armWindow == null ? Duration.ofMinutes(2) : armWindow;
+            pairingTtl = pairingTtl == null ? Duration.ofMinutes(2) : pairingTtl;
         }
     }
 

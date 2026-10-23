@@ -132,6 +132,27 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
       }
     },
     session: () => request('GET', '/api/v1/auth/session'),
+
+    // Desktop pairing (only when the DocGen launcher started the server). The
+    // poll secret stays in memory and travels only in a same-origin JSON body.
+    desktopStatus: () => request('GET', '/api/v1/desktop/status'),
+    startPairing: () => post('/api/v1/desktop/pairings', {}),
+    async pollPairing(pairingId, pollSecret, { signal } = {}) {
+      const response = await request('POST', `/api/v1/desktop/pairings/${id(pairingId)}/token`,
+        { json: { pollSecret }, raw: true, signal });
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      if (response.status === 202) return { pending: true, expiresAt: body?.expiresAt ?? null };
+      if (response.status !== 200 || typeof body?.accessToken !== 'string' || typeof body?.username !== 'string') {
+        throw new ApiError(response.status, 'invalid_response', 'Unexpected pairing response');
+      }
+      tokenStore.set(body.accessToken, body.expiresAt, body.username);
+      return { pending: false, username: body.username };
+    },
     health: () => request('GET', '/api/v1/health'),
     providers: () => request('GET', '/api/v1/providers'),
 

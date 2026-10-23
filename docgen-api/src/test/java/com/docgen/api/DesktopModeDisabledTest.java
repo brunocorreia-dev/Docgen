@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import java.security.SecureRandom;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -25,6 +26,10 @@ class DesktopModeDisabledTest extends ApiTestSupport {
                 .andExpect(status().isUnauthorized());
         mvc.perform(authed(post("/api/v1/desktop/handshake"), token()).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/desktop/status")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/desktop/pairings").header("Origin", "http://localhost")
+                        .header(SecurityConfig.WEB_CLIENT_HEADER, "web").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

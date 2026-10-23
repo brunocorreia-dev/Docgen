@@ -45,6 +45,9 @@ import java.util.regex.Pattern;
 class SecurityConfig {
     static final String WEB_CLIENT_HEADER = "X-DocGen-Client";
     static final String DESKTOP_HANDSHAKE = "/api/v1/desktop/handshake";
+    static final String DESKTOP_STATUS = "/api/v1/desktop/status";
+    static final String DESKTOP_PAIRINGS = "/api/v1/desktop/pairings";
+    static final String DESKTOP_PAIRING_TOKEN = "/api/v1/desktop/pairings/*/token";
     static final String CONTENT_SECURITY_POLICY = String.join("; ",
             "default-src 'none'",
             "script-src 'self'",
@@ -85,7 +88,9 @@ class SecurityConfig {
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/token").permitAll();
                     if (properties.desktop().enabled()) {
                         // Desktop-only routes; each controller enforces its own proof (secret MAC, pairing secret).
-                        authorize.requestMatchers(HttpMethod.POST, DESKTOP_HANDSHAKE).permitAll();
+                        authorize.requestMatchers(HttpMethod.POST, DESKTOP_HANDSHAKE, DESKTOP_PAIRINGS,
+                                DESKTOP_PAIRING_TOKEN).permitAll();
+                        authorize.requestMatchers(HttpMethod.GET, DESKTOP_STATUS).permitAll();
                     }
                     authorize
                             .requestMatchers("/api/v1/**").hasRole("ANALYST")

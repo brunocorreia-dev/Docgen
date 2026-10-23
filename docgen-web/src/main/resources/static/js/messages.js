@@ -34,6 +34,12 @@ const ERRORS = {
   nothing_to_export: 'Gere um plano arquitetural antes de exportar.',
   too_many_sessions: 'Há sessões ativas demais no servidor.',
   invalid_host: 'Endereço de acesso não permitido.',
+  pairing_unavailable: 'Para conectar este navegador, clique em “Abrir DocGen” na janela do aplicativo DocGen.',
+  pairing_conflict: 'Outra solicitação de acesso apareceu ao mesmo tempo e, por segurança, todas foram canceladas. Clique em “Abrir DocGen” na janela do aplicativo para tentar de novo.',
+  pairing_denied: 'O acesso deste navegador foi recusado na janela do DocGen.',
+  pairing_expired: 'O código expirou antes da confirmação. Clique em “Abrir DocGen” na janela do aplicativo para gerar outro.',
+  pairing_replaced: 'Esta solicitação foi substituída ou cancelada. Use a aba aberta mais recentemente pelo DocGen ou clique em “Abrir DocGen” de novo.',
+  origin_rejected: 'Este endereço não pode solicitar acesso ao DocGen.',
   internal_error: 'Ocorreu um erro interno. Tente novamente.',
 };
 

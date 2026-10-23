@@ -5,6 +5,8 @@ import { icon, logo } from './icons.js';
 import { href, parseRoute } from './router.js';
 import { emptyState, setView, toast, button } from './ui.js';
 import { renderLogin } from './views/login.js';
+import { renderDesktopPairing } from './views/desktop-pairing.js';
+import { isDesktopMode } from './desktop.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderProjects } from './views/projects.js';
 import { renderNewProject } from './views/project-new.js';
@@ -26,6 +28,13 @@ const api = createApi({
 let shell = null;
 let viewController = null;
 let providersPromise = null;
+let desktopModePromise = null;
+
+/** True when the DocGen launcher started this server: sessions come from pairing, not passwords. */
+function desktopMode() {
+  if (!desktopModePromise) desktopModePromise = isDesktopMode(api);
+  return desktopModePromise;
+}
 
 const NAV = [
   ['dashboard', 'Dashboard', 'dashboard'],
@@ -99,18 +108,27 @@ async function route() {
   const current = parseRoute(location.hash);
   const authenticated = Boolean(tokenStore.get());
 
-  if (!authenticated || current.name === 'login') {
+  if (!authenticated || current.name === 'login' || current.name === 'desktop') {
     if (authenticated) {
       location.replace(href('dashboard'));
       return;
     }
     shell = null;
-    replace(root, renderLogin({ api, onAuthenticated: () => {
+    const onAuthenticated = () => {
       const target = href('dashboard');
       if (location.hash === target) route();
       else location.hash = target;
-    } }));
-    document.title = 'Entrar · DocGen';
+    };
+    const signal = viewController.signal;
+    if (await desktopMode()) {
+      if (signal.aborted) return;
+      replace(root, renderDesktopPairing({ api, onAuthenticated, signal }));
+      document.title = 'Conectar · DocGen';
+    } else {
+      if (signal.aborted) return;
+      replace(root, renderLogin({ api, onAuthenticated }));
+      document.title = 'Entrar · DocGen';
+    }
     return;
   }
 
