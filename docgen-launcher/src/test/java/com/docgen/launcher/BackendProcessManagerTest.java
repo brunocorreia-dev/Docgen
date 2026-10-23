@@ -364,6 +364,16 @@ class BackendProcessManagerTest {
     }
 
     @Test
+    void readsBoundedLinesFromChattyProcesses() throws IOException {
+        BackendProcessManager.BoundedLineReader reader = new BackendProcessManager.BoundedLineReader(
+                new java.io.StringReader("short\r\n" + "x".repeat(50) + "\nlast"), 10);
+        assertEquals("short", reader.readLine());
+        assertEquals("xxxxxxxxxx [linha truncada]", reader.readLine());
+        assertEquals("last", reader.readLine());
+        assertEquals(null, reader.readLine());
+    }
+
+    @Test
     void stopWithoutAProcessIsANoOp() throws Exception {
         BackendProcessManager manager = manager("ready");
         manager.stop();

@@ -88,6 +88,8 @@
                     <!-- Tests never open windows; UI logic is exercised headlessly. -->
                     <systemPropertyVariables>
                         <java.awt.headless>true</java.awt.headless>
+                        <!-- End-to-end tests use the API jar of this build when it exists (full reactor package/verify). -->
+                        <docgen.backend.jar>${project.basedir}/../docgen-api/target/docgen-api.jar</docgen.backend.jar>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
