@@ -28,7 +28,8 @@ public record DocGenApiProperties(
         @Valid Remote remote,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
-        @Valid Auth auth
+        @Valid Auth auth,
+        @Valid Desktop desktop
 ) {
     @ConstructorBinding
     public DocGenApiProperties {
@@ -38,11 +39,12 @@ public record DocGenApiProperties(
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
         auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
+        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(false, null));
     }
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
     DocGenApiProperties(Api api, Map<String, String> repositories) {
-        this(api, repositories, null, null, null, null, null);
+        this(api, repositories, null, null, null, null, null, null);
     }
 
     public record Api(
@@ -106,6 +108,18 @@ public record DocGenApiProperties(
             maxCharacters = maxCharacters == 0 ? 200_000 : maxCharacters;
             maxPerProject = maxPerProject == 0 ? 5 : maxPerProject;
             retention = retention == null ? Duration.ofDays(30) : retention;
+        }
+    }
+
+    /**
+     * Desktop mode, enabled only by the DocGen launcher, which also hands the
+     * per-launch session secret to the process on stdin (see {@link DesktopLauncherLink}).
+     *
+     * @param bootstrapTimeout how long to wait for the launcher's session line before failing
+     */
+    public record Desktop(boolean enabled, Duration bootstrapTimeout) {
+        public Desktop {
+            bootstrapTimeout = bootstrapTimeout == null ? Duration.ofSeconds(30) : bootstrapTimeout;
         }
     }
 

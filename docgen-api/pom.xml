@@ -19,6 +19,12 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <!-- Launcher handshake: stdin bootstrap secret, HMAC messages and readiness proofs. JDK only. -->
+            <groupId>com.docgen</groupId>
+            <artifactId>docgen-desktop-protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>

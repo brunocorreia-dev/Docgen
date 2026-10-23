@@ -58,3 +58,7 @@ docgen:
     token-ttl: 8h
     idle-timeout: 30m
     consent-ttl: 10m
+  desktop:
+    # Set only by the DocGen desktop launcher (--docgen.desktop.enabled=true), which also
+    # writes the per-launch session secret to stdin. Never enable it for docgen-server.
+    enabled: false

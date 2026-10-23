@@ -44,6 +44,7 @@ import java.util.regex.Pattern;
 @Configuration(proxyBeanMethods = false)
 class SecurityConfig {
     static final String WEB_CLIENT_HEADER = "X-DocGen-Client";
+    static final String DESKTOP_HANDSHAKE = "/api/v1/desktop/handshake";
     static final String CONTENT_SECURITY_POLICY = String.join("; ",
             "default-src 'none'",
             "script-src 'self'",
@@ -75,14 +76,21 @@ class SecurityConfig {
                 .authenticationManager(authenticationManager)
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(authorize -> authorize
-                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/", "/index.html", "/favicon.svg",
-                                "/css/**", "/js/**", "/img/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/providers").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/token").permitAll()
-                        .requestMatchers("/api/v1/**").hasRole("ANALYST")
-                        .anyRequest().denyAll())
+                .authorizeHttpRequests(authorize -> {
+                    authorize
+                            .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                            .requestMatchers(HttpMethod.GET, "/", "/index.html", "/favicon.svg",
+                                    "/css/**", "/js/**", "/img/**").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/providers").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/v1/auth/token").permitAll();
+                    if (properties.desktop().enabled()) {
+                        // Desktop-only routes; each controller enforces its own proof (secret MAC, pairing secret).
+                        authorize.requestMatchers(HttpMethod.POST, DESKTOP_HANDSHAKE).permitAll();
+                    }
+                    authorize
+                            .requestMatchers("/api/v1/**").hasRole("ANALYST")
+                            .anyRequest().denyAll();
+                })
                 .httpBasic(basic -> basic.authenticationEntryPoint(entryPoint))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(entryPoint)

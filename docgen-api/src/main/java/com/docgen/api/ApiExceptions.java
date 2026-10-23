@@ -44,6 +44,12 @@ final class UnprocessableContentException extends PublicApiException {
     }
 }
 
+final class ForbiddenException extends PublicApiException {
+    ForbiddenException(String code, String publicMessage) {
+        super(code, publicMessage);
+    }
+}
+
 final class CapacityExceededException extends PublicApiException {
     CapacityExceededException(String code, String publicMessage) {
         super(code, publicMessage);
