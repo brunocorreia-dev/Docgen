@@ -21,7 +21,8 @@ import java.util.regex.Pattern;
  * Simulated backend used by the lifecycle tests. It runs as a real child
  * process and speaks the desktop protocol, with modes that inject faults:
  * <ul>
- *   <li>{@code ready}: behaves like the real API (exits when stdin closes)</li>
+ *   <li>{@code ready}: behaves like the real API (exits when stdin closes) and emulates a
+ *   browser pairing request after ARM</li>
  *   <li>{@code exit:<code>:<text>}: prints the text and exits during startup</li>
  *   <li>{@code silent}: never announces readiness</li>
  *   <li>{@code wrong-proof}, {@code forged-json}, {@code health-only}: bad readiness answers</li>
@@ -34,6 +35,9 @@ import java.util.regex.Pattern;
  * </ul>
  */
 public final class FakeBackend {
+    static final String PAIRING_ID = "0f8c2a52-3b5d-4c1e-9a7f-1234567890ab";
+    static final String PAIRING_CODE = "ABCD-EFGH";
+
     private FakeBackend() {
     }
 
@@ -113,6 +117,19 @@ public final class FakeBackend {
                     try {
                         DesktopMessage command = session.accept(line, DesktopMessage.Direction.COMMAND);
                         System.out.println(session.encode(DesktopMessage.Direction.EVENT, "ACK", command.type()));
+                        // Pairing emulation: a browser asks right after ARM; decisions close the request.
+                        switch (command.type()) {
+                            case "ARM" -> System.out.println(session.encode(DesktopMessage.Direction.EVENT,
+                                    "PAIRING_REQUESTED", PAIRING_ID, PAIRING_CODE,
+                                    String.valueOf(System.currentTimeMillis() / 1000 + 120)));
+                            case "APPROVE" -> System.out.println(session.encode(DesktopMessage.Direction.EVENT,
+                                    "PAIRING_CLOSED", command.field(0), "completed"));
+                            case "DENY" -> System.out.println(session.encode(DesktopMessage.Direction.EVENT,
+                                    "PAIRING_CLOSED", command.field(0), "denied"));
+                            default -> {
+                                // Other commands are only acknowledged.
+                            }
+                        }
                     } catch (DesktopProtocolException rejected) {
                         System.out.println("rejected command");
                     }
@@ -137,9 +154,10 @@ public final class FakeBackend {
         return Path.of(System.getProperty("java.home"), "bin", "java").toString();
     }
 
-    /** Test classes plus the protocol classes, located from the classes themselves. */
+    /** Test, launcher and protocol classes, located from the classes themselves. */
     static String classpath() {
-        return String.join(File.pathSeparator, List.of(location(FakeBackend.class), location(DesktopBootstrap.class)));
+        return String.join(File.pathSeparator, List.of(location(FakeBackend.class), location(DocGenLauncher.class),
+                location(DesktopBootstrap.class)).stream().distinct().toList());
     }
 
     private static String location(Class<?> type) {

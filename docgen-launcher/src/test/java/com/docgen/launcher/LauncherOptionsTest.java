@@ -46,6 +46,22 @@ class LauncherOptionsTest {
     }
 
     @Test
+    void parsesCheckModePortAndStartupTimeout() {
+        LauncherOptions options = LauncherOptions.parse(List.of("--check", "--port", "8080", "--startup-timeout=30"));
+        assertEquals(LauncherOptions.Mode.CHECK, options.mode());
+        assertEquals(8080, options.port());
+        assertEquals(java.time.Duration.ofSeconds(30), options.startupTimeout());
+        LauncherOptions defaults = LauncherOptions.parse(List.of());
+        assertEquals(null, defaults.port());
+        assertEquals(BackendConfiguration.DEFAULT_STARTUP_TIMEOUT, defaults.startupTimeout());
+        for (List<String> invalid : List.of(List.of("--port", "0"), List.of("--port=70000"), List.of("--port", "-1"),
+                List.of("--port", "80a"), List.of("--startup-timeout", "5"), List.of("--startup-timeout=601"),
+                List.of("--port", "1", "--port", "2"), List.of("--check", "--diagnose"))) {
+            assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(invalid), invalid.toString());
+        }
+    }
+
+    @Test
     void neutralizesControlCharactersInEchoedArguments() {
         String printable = LauncherOptions.printable("--x\u001b[31m\n" + "y".repeat(200));
         assertFalse(printable.chars().anyMatch(Character::isISOControl));

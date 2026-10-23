@@ -63,6 +63,11 @@ final class UserMessages {
                 "Ele não contém senha; o acesso continua exigindo sua confirmação nesta janela.");
     }
 
+    static Notice armFailed() {
+        return new Notice("Não foi possível preparar o acesso",
+                "O backend não aceitou o pedido de abertura do workspace.", "Clique em “Tentar novamente” se o problema persistir.");
+    }
+
     static Notice browserOpened() {
         return new Notice("Navegador aberto",
                 "Confira o código exibido no navegador e confirme nesta janela.", null);
