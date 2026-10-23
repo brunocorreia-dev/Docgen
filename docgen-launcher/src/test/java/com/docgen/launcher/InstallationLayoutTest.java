@@ -79,9 +79,10 @@ class InstallationLayoutTest {
     }
 
     @Test
-    void findsThePackagedBackendNextToTheLauncherIndependentlyOfTheWorkingDirectory() throws IOException {
+    void findsThePackagedBackendIndependentlyOfTheWorkingDirectory() throws IOException {
+        // jpackage app image: lib/app holds the launcher (its classpath), lib/backend the API jar.
         Path appDirectory = Files.createDirectories(temp.resolve("DocGen/lib/app"));
-        Path backend = Files.createDirectories(appDirectory.resolve("backend")).resolve("docgen-api.jar");
+        Path backend = Files.createDirectories(temp.resolve("DocGen/lib/backend")).resolve("docgen-api.jar");
         Files.writeString(backend, "jar");
         InstallationLayout layout = InstallationLayout.resolve(LINUX, Map.of(), temp.resolve("home"),
                 appDirectory.resolve("docgen-launcher.jar"), null, temp.resolve("DocGen/bin/DocGen").toString());
@@ -89,7 +90,16 @@ class InstallationLayoutTest {
         assertTrue(layout.packaged());
         assertEquals(temp.resolve("DocGen"), layout.installationDirectory());
         assertEquals(backend, layout.backendJar());
-        assertEquals(appDirectory.resolve("backend/docgen-api.jar"), layout.backendCandidates().getFirst());
+        assertEquals(temp.resolve("DocGen/lib/backend/docgen-api.jar"), layout.backendCandidates().getFirst());
+    }
+
+    @Test
+    void findsAPortableBackendNextToTheLauncher() throws IOException {
+        Path directory = Files.createDirectories(temp.resolve("portable"));
+        Path backend = Files.writeString(directory.resolve("docgen-api.jar"), "jar");
+        InstallationLayout layout = InstallationLayout.resolve(LINUX, Map.of(), temp.resolve("home"),
+                directory.resolve("docgen-launcher.jar"), null, null);
+        assertEquals(backend, layout.backendJar());
     }
 
     @Test
@@ -117,7 +127,7 @@ class InstallationLayoutTest {
         InstallationLayout layout = InstallationLayout.resolve(LINUX, Map.of(), temp.resolve("home"), launcher, null,
                 repository.resolve("bin/DocGen").toString());
         assertNull(layout.backendJar());
-        assertEquals(2, layout.backendCandidates().size());
+        assertEquals(3, layout.backendCandidates().size());
     }
 
     @Test

@@ -86,6 +86,10 @@ record InstallationLayout(
         if (backendOverride != null) {
             candidates.add(backendOverride.toAbsolutePath().normalize());
         } else {
+            // jpackage app content (lib/backend on Linux, Contents/backend on macOS): off the launcher's classpath.
+            if (launcherDirectory.getParent() != null) {
+                candidates.add(launcherDirectory.getParent().resolve("backend").resolve(BACKEND_JAR));
+            }
             candidates.add(launcherDirectory.resolve("backend").resolve(BACKEND_JAR));
             candidates.add(launcherDirectory.resolve(BACKEND_JAR));
             if (!packaged) {
