@@ -655,7 +655,7 @@ A descrição detalhada de cada componente e das fronteiras de segurança está 
 
 ### Estratégia de testes
 
-A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a Groq ou Ollama: os testes da API substituem o provedor por um duplo programável. Contagem atual: **171** testes no core, **13** na CLI, **79** na API, **10** no protocolo desktop, **104** no launcher e **51** no frontend. Os testes do launcher iniciam processos reais (um backend simulado e, quando o `docgen-api.jar` foi empacotado no mesmo build, a API verdadeira).
+A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a Groq ou Ollama: os testes da API substituem o provedor por um duplo programável. Contagem atual: **171** testes no core, **13** na CLI, **79** na API, **10** no protocolo desktop, **105** no launcher e **51** no frontend. Os testes do launcher iniciam processos reais (um backend simulado e, quando o `docgen-api.jar` foi empacotado no mesmo build, a API verdadeira).
 
 | Classe de teste | Foco |
 |---|---|

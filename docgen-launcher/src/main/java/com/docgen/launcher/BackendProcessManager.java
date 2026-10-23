@@ -185,11 +185,17 @@ final class BackendProcessManager implements AutoCloseable {
         Writer stdin = new BufferedWriter(new OutputStreamWriter(started.getOutputStream(), StandardCharsets.US_ASCII));
         Thread reader = Thread.ofPlatform().daemon().name("docgen-backend-output").unstarted(
                 () -> readOutput(started, opened, announced));
+        boolean cancelled;
         synchronized (lock) {
             process = started;
             session = opened;
             commands = stdin;
             outputReader = reader;
+            cancelled = stopRequested;
+        }
+        if (cancelled) {
+            // stop() ran before there was a process to stop; do not wait for readiness or the timeout.
+            throw new BackendStartupException(BackendStartupException.Reason.CANCELLED, "startup cancelled");
         }
         logs.launcher("backend process started (pid " + started.pid() + ", requested port "
                 + (requestedPort == 0 ? "ephemeral" : requestedPort) + ")");
@@ -487,7 +493,8 @@ final class BackendProcessManager implements AutoCloseable {
     }
 
     private static void joinQuietly(Thread thread, Duration timeout) {
-        if (thread == null || thread == Thread.currentThread()) {
+        // A start cancelled before its reader started leaves a NEW thread; join(Duration) rejects those.
+        if (thread == null || thread == Thread.currentThread() || thread.getState() == Thread.State.NEW) {
             return;
         }
         try {

@@ -374,6 +374,26 @@ class BackendProcessManagerTest {
     }
 
     @Test
+    void aStopRequestedBeforeTheProcessExistsStillCancelsPromptly() throws Exception {
+        BackendProcessManager manager = manager(FakeBackend.command("silent"), 0, Duration.ofSeconds(30));
+        manager.addListener(new BackendProcessManager.Listener() {
+            @Override
+            public void stateChanged(BackendLifecycleState state, BackendStartupException failure) {
+                if (state == BackendLifecycleState.STARTING) {
+                    manager.stop();
+                }
+            }
+        });
+
+        long started = System.nanoTime();
+        BackendStartupException failure = assertThrows(BackendStartupException.class, manager::start);
+
+        assertEquals(BackendStartupException.Reason.CANCELLED, failure.reason());
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).toSeconds() < 10, "no wait for the 30 s timeout");
+        assertEquals(BackendLifecycleState.STOPPED, manager.state());
+    }
+
+    @Test
     void stopWithoutAProcessIsANoOp() throws Exception {
         BackendProcessManager manager = manager("ready");
         manager.stop();
