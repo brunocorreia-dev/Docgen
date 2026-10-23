@@ -9,13 +9,15 @@
     <version>2.0.0</version>
     <packaging>pom</packaging>
     <name>DocGen</name>
-    <description>Secure documentation and architecture-planning engine, CLI, loopback REST API and web workspace.</description>
+    <description>Secure documentation and architecture-planning engine, CLI, loopback REST API, web workspace and desktop launcher.</description>
 
     <modules>
         <module>docgen-core</module>
         <module>docgen-cli</module>
         <module>docgen-web</module>
         <module>docgen-api</module>
+        <!-- Declared after docgen-api so a full reactor build packages the API jar first. -->
+        <module>docgen-launcher</module>
     </modules>
 
     <properties>
@@ -28,6 +30,7 @@
         <maven.compiler.version>3.15.0</maven.compiler.version>
         <maven.surefire.version>3.5.5</maven.surefire.version>
         <maven.shade.version>3.6.2</maven.shade.version>
+        <maven.jar.version>3.5.0</maven.jar.version>
         <cyclonedx.version>2.9.2</cyclonedx.version>
         <pdfbox.version>3.0.8</pdfbox.version>
     </properties>
@@ -68,6 +71,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-shade-plugin</artifactId>
                     <version>${maven.shade.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>${maven.jar.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
