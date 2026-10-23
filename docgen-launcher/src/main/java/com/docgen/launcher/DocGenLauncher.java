@@ -37,11 +37,24 @@ public final class DocGenLauncher {
                 out.println("DocGen Launcher " + version());
                 yield EXIT_OK;
             }
+            case DIAGNOSE -> diagnose(options, out);
             case HELP, DESKTOP -> {
                 out.print(LauncherOptions.USAGE);
                 yield EXIT_OK;
             }
         };
+    }
+
+    private static int diagnose(LauncherOptions options, PrintStream out) {
+        PlatformDetector.Platform platform = PlatformDetector.current();
+        LauncherDiagnostics.Report report = LauncherDiagnostics.run(platform, RuntimeEnvironment.current(platform),
+                InstallationLayout.current(platform, options.backendJar()));
+        out.println("DocGen Launcher " + version() + " — diagnóstico");
+        out.println();
+        out.print(report.toText());
+        out.println();
+        out.println(report.ok() ? "Ambiente pronto para iniciar o DocGen." : "O DocGen não pode ser iniciado neste ambiente.");
+        return report.ok() ? EXIT_OK : EXIT_FAILURE;
     }
 
     static String version() {

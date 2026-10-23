@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,6 +30,19 @@ class LauncherOptionsTest {
     void rejectsUnknownAndConflictingOptions() {
         assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(List.of("--bogus")));
         assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(List.of("--help", "--version")));
+        assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(List.of("--diagnose=yes")));
+    }
+
+    @Test
+    void parsesTheBackendJarOverrideInBothForms() {
+        LauncherOptions separate = LauncherOptions.parse(List.of("--diagnose", "--backend-jar", "/opt/docgen-api.jar"));
+        assertEquals(LauncherOptions.Mode.DIAGNOSE, separate.mode());
+        assertEquals(Path.of("/opt/docgen-api.jar"), separate.backendJar());
+        assertEquals(Path.of("/x/api.jar"), LauncherOptions.parse(List.of("--backend-jar=/x/api.jar")).backendJar());
+        assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(List.of("--backend-jar")));
+        assertThrows(IllegalArgumentException.class, () -> LauncherOptions.parse(List.of("--backend-jar=")));
+        assertThrows(IllegalArgumentException.class,
+                () -> LauncherOptions.parse(List.of("--backend-jar=/a.jar", "--backend-jar=/b.jar")));
     }
 
     @Test
