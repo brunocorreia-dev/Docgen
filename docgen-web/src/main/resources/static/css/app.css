@@ -139,13 +139,13 @@ code, pre { font-family: var(--mono); }
 .nav-link.is-active .icon { color: var(--cyan); }
 
 .sidebar-footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem; border-radius: var(--radius); background: rgba(140, 160, 255, 0.05); border: 1px solid var(--border); }
-.user-chip { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.local-chip { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
 .user-avatar, .recent-avatar {
   display: grid; place-items: center; flex: none;
   width: 32px; height: 32px; border-radius: 10px;
   background: var(--gradient); color: #fff; font-weight: 700; font-size: 0.85rem;
 }
-.user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+.local-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
 
 .content { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -321,17 +321,19 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .search .search-input:focus { box-shadow: none; }
 
 /* Login */
-.login-screen { position: relative; z-index: 1; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; overflow: hidden; }
-.login-aurora { position: absolute; width: 720px; height: 720px; border-radius: 50%; background: conic-gradient(from 90deg, rgba(79, 124, 255, 0.35), rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.3), rgba(79, 124, 255, 0.35)); filter: blur(110px); opacity: 0.45; animation: drift 18s ease-in-out infinite alternate; }
-.login-card { position: relative; width: min(440px, 100%); padding: 2.1rem; border-radius: 24px; background: rgba(12, 17, 34, 0.82); border: 1px solid var(--border-strong); box-shadow: var(--shadow); backdrop-filter: blur(18px); animation: rise 0.6s var(--ease) both; }
-.login-brand { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 1.6rem; }
-.login-brand h1 { font-size: 1.6rem; }
-.login-brand p { color: var(--text-muted); font-size: 0.9rem; }
-.login-form { display: flex; flex-direction: column; gap: 0.2rem; }
-.login-form .form-alert { margin-bottom: 0.8rem; }
-.login-facts { list-style: none; padding: 1.2rem 0 0; margin: 1.4rem 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
-.login-facts li { display: flex; gap: 0.55rem; align-items: flex-start; }
-.login-facts .icon { color: var(--cyan); margin-top: 2px; }
+.access-screen { position: relative; z-index: 1; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; overflow: hidden; }
+.access-aurora { position: absolute; width: 720px; height: 720px; border-radius: 50%; background: conic-gradient(from 90deg, rgba(79, 124, 255, 0.35), rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.3), rgba(79, 124, 255, 0.35)); filter: blur(110px); opacity: 0.45; animation: drift 18s ease-in-out infinite alternate; }
+.access-card { position: relative; width: min(440px, 100%); padding: 2.1rem; border-radius: 24px; background: rgba(12, 17, 34, 0.82); border: 1px solid var(--border-strong); box-shadow: var(--shadow); backdrop-filter: blur(18px); animation: rise 0.6s var(--ease) both; }
+.access-brand { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 1.6rem; }
+.access-brand h1 { font-size: 1.6rem; }
+.access-brand p { color: var(--text-muted); font-size: 0.9rem; }
+.access-title { display: flex; align-items: center; gap: 0.5rem; font-size: 1.1rem; margin-bottom: 0.6rem; }
+.access-title .icon { color: var(--cyan); }
+.access-card[role="alert"] .access-title .icon { color: var(--red); }
+.access-message { color: var(--text-muted); line-height: 1.55; }
+.access-facts { list-style: none; padding: 1.2rem 0 0; margin: 1.4rem 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
+.access-facts li { display: flex; gap: 0.55rem; align-items: flex-start; }
+.access-facts .icon { color: var(--cyan); margin-top: 2px; }
 
 /* Dashboard */
 .hero { position: relative; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: center; gap: 2rem; padding: clamp(1.4rem, 3.5vw, 2.6rem); border-radius: 26px; background: linear-gradient(135deg, rgba(20, 28, 56, 0.85), rgba(14, 18, 36, 0.85)); border: 1px solid var(--border-strong); overflow: hidden; box-shadow: var(--shadow); }

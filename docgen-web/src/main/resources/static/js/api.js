@@ -1,6 +1,6 @@
-// HTTP client for the DocGen REST API. Credentials are a bearer token sent in
-// the Authorization header only (never cookies), which is why cross-site
-// requests cannot ride on the user's session.
+// HTTP client for the DocGen REST API. The only credential is a session token
+// sent in the Authorization header (never a cookie), born from the single-use
+// launch token the desktop launcher puts in the /launch address (ADR 0002).
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -13,7 +13,10 @@ export class ApiError extends Error {
 
 const TOKEN_KEY = 'docgen.session';
 
-/** Token storage in sessionStorage: scoped to this tab and cleared when it closes. */
+/**
+ * Session storage scoped to this tab (sessionStorage is per origin and never
+ * sent automatically). A new tab has no session: it opens through the launcher.
+ */
 export function sessionTokenStore(storage = globalThis.sessionStorage) {
   return {
     get() {
@@ -21,28 +24,16 @@ export function sessionTokenStore(storage = globalThis.sessionStorage) {
         const raw = storage.getItem(TOKEN_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed.token !== 'string') return null;
-        if (parsed.expiresAt && Date.parse(parsed.expiresAt) <= Date.now()) {
-          storage.removeItem(TOKEN_KEY);
-          return null;
-        }
-        return parsed.token;
+        return parsed && typeof parsed.token === 'string' ? parsed.token : null;
       } catch {
         return null;
       }
     },
-    username() {
+    set(token) {
       try {
-        return JSON.parse(storage.getItem(TOKEN_KEY) || 'null')?.username ?? null;
+        storage.setItem(TOKEN_KEY, JSON.stringify({ token }));
       } catch {
-        return null;
-      }
-    },
-    set(token, expiresAt, username) {
-      try {
-        storage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt, username }));
-      } catch {
-        // Storage can be unavailable (private mode); the session then lasts for this page only.
+        // Storage can be unavailable; the session then lasts for this page only.
       }
     },
     clear() {
@@ -56,12 +47,11 @@ export function sessionTokenStore(storage = globalThis.sessionStorage) {
 }
 
 export function memoryTokenStore() {
-  let state = null;
+  let token = null;
   return {
-    get: () => state?.token ?? null,
-    username: () => state?.username ?? null,
-    set: (token, expiresAt, username) => { state = { token, expiresAt, username }; },
-    clear: () => { state = null; },
+    get: () => token,
+    set: (value) => { token = value; },
+    clear: () => { token = null; },
   };
 }
 
@@ -69,7 +59,7 @@ const id = (value) => encodeURIComponent(String(value));
 
 export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), tokenStore = memoryTokenStore(), onUnauthorized } = {}) {
   async function request(method, path, { json, body, headers = {}, raw = false, signal } = {}) {
-    const requestHeaders = { 'X-DocGen-Client': 'web', Accept: 'application/json', ...headers };
+    const requestHeaders = { Accept: 'application/json', ...headers };
     const token = tokenStore.get();
     if (token) requestHeaders.Authorization = `Bearer ${token}`;
     let payload = body;
@@ -119,20 +109,27 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
   return {
     tokenStore,
 
-    async login(username, password) {
-      const session = await post('/api/v1/auth/token', { username, password });
-      tokenStore.set(session.accessToken, session.expiresAt, session.username);
+    /** Exchanges the launch token from the /launch address for this tab's session. */
+    async startSession(launchToken) {
+      const session = await post('/api/v1/session', { launchToken });
+      tokenStore.set(session.accessToken);
       return session;
     },
-    async logout() {
+    async endSession() {
       try {
-        if (tokenStore.get()) await request('DELETE', '/api/v1/auth/token');
+        if (tokenStore.get()) await request('DELETE', '/api/v1/session');
       } finally {
         tokenStore.clear();
       }
     },
-    session: () => request('GET', '/api/v1/auth/session'),
+    session: () => request('GET', '/api/v1/session'),
     health: () => request('GET', '/api/v1/health'),
+    heartbeat: () => post('/api/v1/desktop/heartbeat'),
+    /** "Sair do DocGen": the server answers, then stops. */
+    async quit() {
+      await post('/api/v1/desktop/shutdown');
+      tokenStore.clear();
+    },
 
     listProjects: () => request('GET', '/api/v1/projects'),
     getProject: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}`),

@@ -75,23 +75,33 @@ class ProjectApiTest extends ApiTestSupport {
     }
 
     @Test
-    void projectsAreIsolatedPerUser() throws Exception {
-        String owner = token();
-        String intruder = token(OTHER, OTHER_PASSWORD);
-        String id = createProject(owner, "ollama");
+    void rowsOfAnotherOwnerStayInvisibleToTheLocalSession() throws Exception {
+        String token = token();
+        String foreign = foreignProject();
+        String own = createProject(token, "ollama");
 
-        mvc.perform(authed(get("/api/v1/projects/" + id), intruder)).andExpect(status().isNotFound());
-        mvc.perform(authed(put("/api/v1/projects/" + id), intruder)
+        mvc.perform(authed(get("/api/v1/projects/" + foreign), token)).andExpect(status().isNotFound());
+        mvc.perform(authed(put("/api/v1/projects/" + foreign), token)
                         .contentType(MediaType.APPLICATION_JSON).content(projectJson("pwned", "ollama")))
                 .andExpect(status().isNotFound());
-        mvc.perform(authed(delete("/api/v1/projects/" + id), intruder)).andExpect(status().isNotFound());
-        mvc.perform(authed(get("/api/v1/projects/" + id + "/attachments"), intruder)).andExpect(status().isNotFound());
-        mvc.perform(authed(get("/api/v1/projects/" + id + "/plans"), intruder)).andExpect(status().isNotFound());
-        mvc.perform(authed(get("/api/v1/projects/" + id + "/jobs"), intruder)).andExpect(status().isNotFound());
-        mvc.perform(authed(get("/api/v1/projects/" + id + "/artifacts"), intruder)).andExpect(status().isNotFound());
-        JsonNode intruderList = json(authed(get("/api/v1/projects"), intruder), 200);
-        intruderList.path("projects").forEach(item -> assertFalse(item.path("id").asString().equals(id)));
-        mvc.perform(authed(get("/api/v1/projects/" + id), owner)).andExpect(status().isOk());
+        mvc.perform(authed(delete("/api/v1/projects/" + foreign), token)).andExpect(status().isNotFound());
+        mvc.perform(authed(get("/api/v1/projects/" + foreign + "/attachments"), token)).andExpect(status().isNotFound());
+        mvc.perform(authed(get("/api/v1/projects/" + foreign + "/plans"), token)).andExpect(status().isNotFound());
+        mvc.perform(authed(get("/api/v1/projects/" + foreign + "/jobs"), token)).andExpect(status().isNotFound());
+        mvc.perform(authed(get("/api/v1/projects/" + foreign + "/artifacts"), token)).andExpect(status().isNotFound());
+        JsonNode list = json(authed(get("/api/v1/projects"), token), 200);
+        list.path("projects").forEach(item -> assertFalse(item.path("id").asString().equals(foreign)));
+        mvc.perform(authed(get("/api/v1/projects/" + own), token)).andExpect(status().isOk());
+        assertEquals(1, jdbc.sql("SELECT COUNT(*) FROM projects WHERE id = :id").param("id", foreign)
+                .query(Integer.class).single(), "the foreign project was not touched");
+    }
+
+    @Test
+    void newProjectsBelongToTheFixedLocalOwner() throws Exception {
+        String id = createProject(token(), "ollama");
+
+        assertEquals("local", jdbc.sql("SELECT owner FROM projects WHERE id = :id").param("id", id)
+                .query(String.class).single());
     }
 
     @Test

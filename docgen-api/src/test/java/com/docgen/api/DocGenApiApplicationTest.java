@@ -25,12 +25,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @org.springframework.test.context.ActiveProfiles("test")
 @AutoConfigureMockMvc
+@org.springframework.context.annotation.Import(LoopbackMockMvc.class)
 class DocGenApiApplicationTest {
     private static final Path AUTHORIZED_REPOSITORY = createRepository(false);
     private static final Path BROKEN_REPOSITORY = createRepository(true);
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    LaunchTokenService launchTokens;
+
+    private String session() throws Exception {
+        String body = mockMvc.perform(post("/api/v1/session")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"launchToken\":\"" + launchTokens.issue() + "\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return "Bearer " + tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(body).path("accessToken").asString();
+    }
 
     @DynamicPropertySource
     static void repositories(DynamicPropertyRegistry registry) {
@@ -51,23 +65,23 @@ class DocGenApiApplicationTest {
     }
 
     @Test
-    void analysisRequiresValidBasicAuthentication() throws Exception {
+    void analysisRequiresASession() throws Exception {
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string("WWW-Authenticate", "Basic realm=\"docgen-local\""))
+                .andExpect(header().string("WWW-Authenticate", "Bearer realm=\"docgen-local\""))
                 .andExpect(jsonPath("$.code").value("authentication_required"));
 
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
-                        .with(httpBasic("test-analyst", "wrong-password"))
+                        .with(httpBasic("local", "any-password-at-all"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void analysisRequiresTheAnalystRole() throws Exception {
+    void analysisRequiresTheLocalSessionRole() throws Exception {
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
                         .with(user("viewer").roles("VIEWER"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -79,7 +93,7 @@ class DocGenApiApplicationTest {
     @Test
     void analyzesOnlyARegisteredRepositoryThroughDocumentationService() throws Exception {
         String response = mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"includeExtensions\":[\"java\"]}"))
                 .andExpect(status().isOk())
@@ -97,7 +111,7 @@ class DocGenApiApplicationTest {
     @Test
     void returnsNotFoundForAnUnregisteredOpaqueId() throws Exception {
         mockMvc.perform(post("/api/v1/repositories/missing-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isNotFound())
@@ -107,14 +121,14 @@ class DocGenApiApplicationTest {
     @Test
     void rejectsMaliciousPathFieldsAndExtensionValues() throws Exception {
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"path\":\"/etc\",\"includeExtensions\":[]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
 
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"includeExtensions\":[\"../pem\"]}"))
                 .andExpect(status().isBadRequest())
@@ -126,7 +140,7 @@ class DocGenApiApplicationTest {
         String oversized = "{\"padding\":\"" + "x".repeat(RequestPolicyFilter.MAX_ANALYSIS_REQUEST_BYTES) + "\"}";
 
         mockMvc.perform(post("/api/v1/repositories/authorized-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(oversized))
                 .andExpect(status().isPayloadTooLarge())
@@ -136,7 +150,7 @@ class DocGenApiApplicationTest {
     @Test
     void sanitizesInternalAnalysisFailures() throws Exception {
         String response = mockMvc.perform(post("/api/v1/repositories/broken-repo/analysis")
-                        .with(httpBasic("test-analyst", "test-password-change-me"))
+                        .header("Authorization", session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isInternalServerError())

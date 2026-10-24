@@ -78,6 +78,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- The desktop launcher runs before Spring (single instance, free port, browser). -->
+                    <mainClass>com.docgen.desktop.DesktopLauncher</mainClass>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

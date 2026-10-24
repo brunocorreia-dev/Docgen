@@ -3,6 +3,7 @@ import { icon } from '../icons.js';
 import { errorMessage } from '../messages.js';
 import { button } from '../ui.js';
 
+
 const MOTION_KEY = 'docgen.reduceMotion';
 
 export function applyMotionPreference() {
@@ -31,10 +32,12 @@ export async function renderSettings(ctx) {
   ctx.setView(h('div', { class: 'page page-narrow' },
     h('header', { class: 'page-header' }, h('div', null, h('h1', null, 'Configurações'), h('p', { class: 'muted' }, 'Sessão, preferências e segurança.'))),
     h('section', { class: 'card card-padded settings-section' },
-      h('h2', null, icon('user'), 'Conta'),
-      h('dl', { class: 'kv' }, h('dt', null, 'Usuário'), h('dd', null, ctx.username() || '—'),
-        h('dt', null, 'Sessão'), h('dd', null, 'Token em memória do servidor, guardado apenas nesta aba (sessionStorage). Expira após 30 min de inatividade.')),
-      button('Sair', { iconName: 'logout', variant: 'danger', onClick: () => ctx.logout() })),
+      h('h2', null, icon('lock'), 'Sessão'),
+      h('dl', { class: 'kv' },
+        h('dt', null, 'Acesso'), h('dd', null, 'Sem conta nem senha: cada janela aberta pelo DocGen recebe um acesso de uso único.'),
+        h('dt', null, 'Sessão'), h('dd', null, 'Guardada só nesta aba. Termina após 12 horas sem uso ou quando o DocGen é fechado.'),
+        h('dt', null, 'Encerramento'), h('dd', null, 'Sem nenhuma janela aberta por 10 minutos, o DocGen se encerra sozinho, mas nunca durante uma geração.')),
+      button('Sair do DocGen', { iconName: 'logout', variant: 'danger', onClick: () => ctx.quit() })),
     h('section', { class: 'card card-padded settings-section' },
       h('h2', null, icon('eye'), 'Preferências'),
       h('label', { class: 'toggle', for: 'pref-motion' }, motion, h('span', { class: 'toggle-track', 'aria-hidden': 'true' }),
@@ -45,7 +48,7 @@ export async function renderSettings(ctx) {
     h('section', { class: 'card card-padded settings-section' },
       h('h2', null, icon('shield'), 'Privacidade e segurança'),
       h('ul', { class: 'bullet-list' },
-        h('li', null, 'O servidor escuta apenas em 127.0.0.1 e exige autenticação em todas as rotas de dados.'),
+        h('li', null, 'O DocGen escuta apenas em 127.0.0.1 e exige a sessão desta janela em todas as rotas de dados.'),
         h('li', null, 'A IA roda só no Ollama deste computador (127.0.0.1). Nenhum conteúdo é enviado para serviços externos.'),
         h('li', null, 'PDFs são processados em área privada e removidos logo após a extração; apenas o texto redigido é guardado, por até 30 dias.'),
         h('li', null, 'Resultados da IA são propostas: revise antes de usar. Nada é apresentado como implementado.')))));

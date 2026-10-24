@@ -1,10 +1,13 @@
-// Application shell: session bootstrap, sidebar navigation and hash routing.
+// Application shell: session check, sidebar navigation, hash routing and the
+// heartbeat that keeps the desktop app alive while a window is open.
 import { createApi, sessionTokenStore } from './api.js';
 import { h, replace } from './dom.js';
+import { startHeartbeat } from './heartbeat.js';
 import { icon, logo } from './icons.js';
+import { errorMessage } from './messages.js';
 import { href, parseRoute } from './router.js';
-import { emptyState, setView, toast, button } from './ui.js';
-import { renderLogin } from './views/login.js';
+import { button, confirmDialog, emptyState, setView, toast } from './ui.js';
+import { closedScreen, noSessionScreen } from './views/access.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderProjects } from './views/projects.js';
 import { renderNewProject } from './views/project-new.js';
@@ -14,17 +17,14 @@ import { renderSettings, applyMotionPreference } from './views/settings.js';
 
 const root = document.getElementById('app');
 const tokenStore = sessionTokenStore();
-const api = createApi({
-  tokenStore,
-  onUnauthorized: () => {
-    toast('Sua sessão expirou. Entre novamente.', { tone: 'info' });
-    shell = null;
-    location.hash = '#/login';
-  },
-});
-
 let shell = null;
 let viewController = null;
+let stopHeartbeat = null;
+
+const api = createApi({
+  tokenStore,
+  onUnauthorized: () => leaveShell(noSessionScreen('ended')),
+});
 
 const NAV = [
   ['dashboard', 'Dashboard', 'dashboard'],
@@ -34,10 +34,31 @@ const NAV = [
   ['settings', 'Configurações', 'settings'],
 ];
 
-async function logout() {
-  await api.logout().catch(() => {});
+/** Replaces the app with a full-page screen; the tab keeps no session behind. */
+function leaveShell(screen) {
+  stopHeartbeat?.();
+  stopHeartbeat = null;
+  viewController?.abort();
   shell = null;
-  location.hash = '#/login';
+  replace(root, screen);
+  document.title = 'DocGen';
+}
+
+/** "Sair do DocGen": stops the whole app, not only this window. */
+async function quit() {
+  const ok = await confirmDialog({
+    title: 'Sair do DocGen',
+    message: 'O DocGen será encerrado neste computador. Gerações em andamento serão interrompidas.',
+    confirmLabel: 'Sair do DocGen',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api.quit();
+    leaveShell(closedScreen());
+  } catch (failure) {
+    toast(errorMessage(failure), { tone: 'error' });
+  }
 }
 
 function buildShell() {
@@ -46,12 +67,12 @@ function buildShell() {
   const navLinks = NAV.map(([name, label, iconName]) => h('a', { class: 'nav-link', href: href(name), dataset: { route: name } },
     icon(iconName), h('span', null, label)));
   const sidebar = h('aside', { class: 'sidebar', id: 'sidebar' },
-    h('a', { class: 'brand', href: href('dashboard') }, logo(34), h('span', null, h('strong', null, 'DocGen'), h('small', null, 'Web workspace'))),
+    h('a', { class: 'brand', href: href('dashboard') }, logo(34), h('span', null, h('strong', null, 'DocGen'), h('small', null, 'IA local'))),
     h('nav', { class: 'nav', 'aria-label': 'Navegação principal' }, navLinks),
     h('div', { class: 'sidebar-footer' },
-      h('div', { class: 'user-chip' }, h('span', { class: 'user-avatar' }, (tokenStore.username() || '?').slice(0, 1).toUpperCase()),
-        h('span', { class: 'user-name' }, tokenStore.username() || 'Usuário')),
-      h('button', { class: 'icon-button', type: 'button', 'aria-label': 'Sair', title: 'Sair', on: { click: logout } }, icon('logout'))));
+      h('div', { class: 'local-chip' }, h('span', { class: 'user-avatar', 'aria-hidden': 'true' }, icon('server', { size: 16 })),
+        h('span', { class: 'local-label', title: 'O DocGen roda só neste computador' }, 'Local')),
+      h('button', { class: 'icon-button', type: 'button', 'aria-label': 'Sair do DocGen', title: 'Sair do DocGen', on: { click: quit } }, icon('logout'))));
   const toggle = h('button', { class: 'icon-button menu-toggle', type: 'button', 'aria-label': 'Abrir menu', 'aria-controls': 'sidebar', 'aria-expanded': 'false',
     on: { click: () => {
       const open = !document.body.classList.contains('nav-open');
@@ -85,26 +106,16 @@ async function route() {
   viewController = new AbortController();
   document.body.classList.remove('nav-open');
   const current = parseRoute(location.hash);
-  const authenticated = Boolean(tokenStore.get());
 
-  if (!authenticated || current.name === 'login') {
-    if (authenticated) {
-      location.replace(href('dashboard'));
-      return;
-    }
-    shell = null;
-    replace(root, renderLogin({ api, onAuthenticated: () => {
-      const target = href('dashboard');
-      if (location.hash === target) route();
-      else location.hash = target;
-    } }));
-    document.title = 'Entrar · DocGen';
+  if (!tokenStore.get()) {
+    leaveShell(noSessionScreen('missing'));
     return;
   }
 
   if (!shell) {
     shell = buildShell();
     replace(root, shell.element);
+    stopHeartbeat = startHeartbeat({ api, onLost: () => leaveShell(closedScreen()) });
   }
   const navRoute = current.name === 'project' ? 'projects' : current.name;
   shell.navLinks.forEach((link) => {
@@ -132,8 +143,7 @@ async function route() {
     api,
     params: current.params,
     signal,
-    username: () => tokenStore.username(),
-    logout,
+    quit,
     setTitle,
     navigate: (target) => { location.hash = target; },
     setView: (...children) => {

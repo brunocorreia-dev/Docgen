@@ -7,23 +7,19 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * DNS-rebinding defense for a loopback service: a page on an attacker's
- * domain that re-resolves to 127.0.0.1 still sends its own host name, so only
- * requests addressed to an allowed local host name are served.
+ * domain that re-resolves to 127.0.0.1 still sends its own host name, and a
+ * page served by another local service sends another port, so only requests
+ * addressed exactly to {@code 127.0.0.1:<port>} or {@code localhost:<port>}
+ * are served.
  */
 final class HostHeaderFilter extends OncePerRequestFilter {
-    private final Set<String> allowedHosts;
+    private final LoopbackAuthority authority;
 
-    HostHeaderFilter(List<String> allowedHosts) {
-        this.allowedHosts = allowedHosts.stream()
-                .map(host -> host.toLowerCase(Locale.ROOT))
-                .collect(Collectors.toUnmodifiableSet());
+    HostHeaderFilter(LoopbackAuthority authority) {
+        this.authority = authority;
     }
 
     @Override
@@ -32,8 +28,7 @@ final class HostHeaderFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        String host = request.getServerName();
-        if (host == null || !allowedHosts.contains(host.toLowerCase(Locale.ROOT))) {
+        if (!authority.allowsHost(request.getHeader("Host"))) {
             RequestPolicyFilter.write(response, HttpServletResponse.SC_BAD_REQUEST, "invalid_host",
                     "The request host is not allowed.");
             return;

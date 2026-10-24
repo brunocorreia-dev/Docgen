@@ -10,11 +10,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.util.Comparator;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -22,11 +20,14 @@ import java.util.stream.Stream;
  * Local persistence: an embedded H2 database inside a private data directory
  * (mode 0700 on POSIX systems) plus a private staging directory for uploads.
  * H2 runs in-process only; no TCP server or web console is started.
+ *
+ * <p>The data directory is resolved per operating system by the desktop
+ * launcher ({@code com.docgen.desktop.AppDirectories}), which also holds the
+ * single-instance lock there, and passed in as
+ * {@code docgen.storage.data-directory}.</p>
  */
 @Configuration(proxyBeanMethods = false)
 class StorageConfig {
-    private static final Set<PosixFilePermission> OWNER_ONLY = PosixFilePermissions.fromString("rwx------");
-
     record StoragePaths(Path dataDirectory, Path staging, boolean temporary) {
     }
 
@@ -42,10 +43,11 @@ class StorageConfig {
         boolean temporary = storage.inMemory();
         if (temporary) {
             data = PrivateFiles.posix()
-                    ? Files.createTempDirectory("docgen-", PosixFilePermissions.asFileAttribute(OWNER_ONLY))
+                    ? Files.createTempDirectory("docgen-",
+                            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
                     : Files.createTempDirectory("docgen-");
         } else {
-            data = resolveDataDirectory(storage.dataDirectory());
+            data = configuredDataDirectory(storage.dataDirectory());
             PrivateFiles.createDirectory(data);
         }
         Path staging = data.resolve("staging");
@@ -73,17 +75,11 @@ class StorageConfig {
         return new HikariDataSource(config);
     }
 
-    static Path resolveDataDirectory(String configured) {
-        Path path;
-        if (configured != null && !configured.isBlank()) {
-            path = Path.of(configured);
-        } else {
-            String xdg = System.getenv("XDG_DATA_HOME");
-            Path base = xdg != null && !xdg.isBlank() && Path.of(xdg).isAbsolute()
-                    ? Path.of(xdg)
-                    : Path.of(System.getProperty("user.home"), ".local", "share");
-            path = base.resolve("docgen");
+    static Path configuredDataDirectory(String configured) {
+        if (configured == null || configured.isBlank()) {
+            throw new IllegalStateException("No data directory is configured; start DocGen through its launcher");
         }
+        Path path = Path.of(configured);
         if (!path.isAbsolute() || !path.equals(path.normalize())) {
             throw new IllegalStateException("The data directory must be an absolute, normalized path");
         }

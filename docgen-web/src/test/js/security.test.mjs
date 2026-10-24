@@ -32,13 +32,28 @@ test('views use the null-safe replace helper instead of native replaceChildren',
   }
 });
 
-test('the page has no inline scripts, styles or handlers and loads only same-origin assets', () => {
-  const html = readFileSync(join(STATIC, 'index.html'), 'utf8');
-  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), 'inline <script>');
-  assert.ok(!/<style/i.test(html), 'inline <style>');
-  assert.ok(!/\son[a-z]+\s*=/i.test(html), 'inline event handler');
-  assert.ok(!/\sstyle\s*=/i.test(html), 'style attribute');
-  assert.ok(!/(src|href)=["']https?:/i.test(html), 'third-party asset');
+test('the pages have no inline scripts, styles or handlers and load only same-origin assets', () => {
+  const pages = files(STATIC, '.html');
+  assert.deepEqual(pages.map((page) => page.slice(STATIC.length + 1)).sort(), ['index.html', 'launch.html']);
+  for (const page of pages) {
+    const html = readFileSync(page, 'utf8');
+    assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), `${page}: inline <script>`);
+    assert.ok(!/<style/i.test(html), `${page}: inline <style>`);
+    assert.ok(!/\son[a-z]+\s*=/i.test(html), `${page}: inline event handler`);
+    assert.ok(!/\sstyle\s*=/i.test(html), `${page}: style attribute`);
+    assert.ok(!/(src|href)=["']https?:/i.test(html), `${page}: third-party asset`);
+    assert.ok(/<meta name="referrer" content="no-referrer">/.test(html), `${page}: referrer policy`);
+  }
+});
+
+test('nothing stores the session outside sessionStorage or reads cookies', () => {
+  for (const file of files(join(STATIC, 'js'), '.js')) {
+    const source = readFileSync(file, 'utf8');
+    assert.ok(!/document\.cookie/.test(source), `${file} touches cookies`);
+    if (/localStorage/.test(source)) {
+      assert.ok(!/session|token/i.test(source.match(/localStorage[^;]*/g).join(' ')), `${file} keeps a credential in localStorage`);
+    }
+  }
 });
 
 test('stylesheets do not import remote resources', () => {
