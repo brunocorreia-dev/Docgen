@@ -88,6 +88,11 @@ public final class DocGenCLI implements Callable<Integer> {
                         + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             }
             return 0;
+        } catch (PromptTooLargeException tooLarge) {
+            System.err.println("Error: " + safeFailureMessage(tooLarge));
+            System.err.println("Narrow the selection with --include-ext or .docgenignore (preview it with --dry-run),"
+                    + " or choose a model with a larger context window with --model.");
+            return 1;
         } catch (Exception e) {
             System.err.println("Error: " + safeFailureMessage(e));
             return 1;

@@ -194,6 +194,24 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
+    void contextWindowFailuresHaveTheirOwnStableCodes() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> {
+            throw new com.docgen.PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768);
+        }, prompt -> {
+            throw new com.docgen.PromptTruncatedException(2_050, 109_951);
+        });
+
+        JsonNode tooLarge = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+        JsonNode truncated = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("prompt_too_large", tooLarge.path("error").path("code").asString());
+        assertEquals("prompt_truncated", truncated.path("error").path("code").asString());
+        assertFalse(tooLarge.toString().contains("qwen2.5-coder"), "exception text is never echoed");
+    }
+
+    @Test
     void unsafeGeneratedMarkdownIsRejected() throws Exception {
         String token = token();
         String project = plannedProject(token);

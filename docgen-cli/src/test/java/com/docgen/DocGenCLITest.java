@@ -99,6 +99,22 @@ class DocGenCLITest {
     }
 
     @Test
+    void aPromptTooLargeForTheModelExplainsHowToNarrowTheInput() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        DocumentationService service = new DocumentationService(model -> prompt -> {
+            throw new PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768);
+        });
+
+        int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("accepts at most 32768"), error);
+        assertTrue(error.contains("--include-ext"), error);
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
     void rejectsEveryProviderOtherThanTheLocalOllama() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 

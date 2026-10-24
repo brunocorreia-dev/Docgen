@@ -63,6 +63,20 @@ class ProviderResponseValidationTest {
     }
 
     @Test
+    void ollamaReportsHowManyPromptTokensItEvaluated() throws Exception {
+        OllamaProvider.Generation generation = OllamaProvider.parseGeneration(Stream.of(
+                "{\"response\":\"# Doc\",\"done\":false}",
+                "{\"response\":\"\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":42}"));
+
+        assertEquals("# Doc", generation.text());
+        assertEquals(42, generation.promptTokens());
+        assertThrows(IOException.class, () -> OllamaProvider.parseGeneration(Stream.of(
+                "{\"response\":\"# Doc\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":\"42\"}")));
+        assertThrows(IOException.class, () -> OllamaProvider.parseGeneration(Stream.of(
+                "{\"response\":\"# Doc\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":-1}")));
+    }
+
+    @Test
     void ollamaDoesNotEchoProviderControlledErrorText() {
         IOException error = assertThrows(IOException.class,
                 () -> OllamaProvider.parseStreamingResponse(Stream.of(

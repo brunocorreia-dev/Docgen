@@ -1,0 +1,253 @@
+{
+  "summary": "Plataforma de agendamento para clínicas com confirmação por mensagem.",
+  "components": [
+    {
+      "id": "svc-0",
+      "name": "Serviço 0",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-1",
+      "name": "Serviço 1",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-2",
+      "name": "Serviço 2",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-3",
+      "name": "Serviço 3",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-4",
+      "name": "Serviço 4",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-5",
+      "name": "Serviço 5",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-6",
+      "name": "Serviço 6",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-7",
+      "name": "Serviço 7",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-8",
+      "name": "Serviço 8",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-9",
+      "name": "Serviço 9",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-10",
+      "name": "Serviço 10",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-11",
+      "name": "Serviço 11",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-12",
+      "name": "Serviço 12",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-13",
+      "name": "Serviço 13",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-14",
+      "name": "Serviço 14",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-15",
+      "name": "Serviço 15",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-16",
+      "name": "Serviço 16",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-17",
+      "name": "Serviço 17",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-18",
+      "name": "Serviço 18",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-19",
+      "name": "Serviço 19",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-20",
+      "name": "Serviço 20",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-21",
+      "name": "Serviço 21",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring Boot",
+        "PostgreSQL"
+      ]
+    },
+    {
+      "id": "svc-22",
+      "name": "Serviço 22",
+      "type": "SERVICE",
+      "responsibility": "Gerencia horários e cancelamentos com auditoria.",
+      "technologies": [
+        "Java 21",
+        "Spring 

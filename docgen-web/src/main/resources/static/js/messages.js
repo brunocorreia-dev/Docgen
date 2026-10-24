@@ -42,6 +42,8 @@ const JOB_ERRORS = {
   provider_timeout: 'O Ollama não respondeu a tempo. Modelos grandes podem demorar no primeiro uso; tente novamente.',
   provider_unavailable: 'O Ollama não está acessível neste computador. Abra o Ollama e tente novamente.',
   provider_failed: 'A requisição ao Ollama falhou. Tente novamente.',
+  prompt_too_large: 'O conteúdo não cabe na janela de contexto do modelo. Reduza a descrição ou os anexos, ou escolha um modelo com contexto maior.',
+  prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',
 };
 
