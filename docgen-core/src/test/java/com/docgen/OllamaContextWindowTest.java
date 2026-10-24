@@ -80,6 +80,22 @@ class OllamaContextWindowTest {
     }
 
     @Test
+    void aMissingModelFailsWithoutAnyDownloadOrGeneration() throws Exception {
+        try (FakeOllamaServer ollama = new FakeOllamaServer().modelInstalled(false)) {
+            ModelNotInstalledException error = assertThrows(ModelNotInstalledException.class,
+                    () -> provider(ollama).generateDocumentation("hello"));
+
+            assertEquals("qwen2.5-coder:7b", error.model());
+            assertEquals(java.util.List.of("/api/show"), ollama.requestedPaths(), "nothing but the lookup is requested");
+        }
+    }
+
+    @Test
+    void theDefaultModelIsTheVerifiedQwenCoderTag() {
+        assertEquals("qwen2.5-coder:7b", LLMProviderFactory.DEFAULT_MODEL);
+    }
+
+    @Test
     void aModelWithoutAReportedContextWindowFailsClosed() throws Exception {
         try (FakeOllamaServer ollama = new FakeOllamaServer().modelContextTokens(null)) {
             IOException error = assertThrows(IOException.class, () -> provider(ollama).generateDocumentation("hello"));

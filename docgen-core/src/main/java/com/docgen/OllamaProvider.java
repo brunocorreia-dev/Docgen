@@ -159,7 +159,7 @@ public final class OllamaProvider implements LLMProvider {
             return HttpResponse.BodySubscribers.replacing("");
         }, Duration.ofSeconds(10), "Ollama");
         if (response.statusCode() == 404) {
-            throw new IOException("Ollama does not have model " + model + " installed.");
+            throw new ModelNotInstalledException(model);
         }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("Ollama is not responding on " + endpoint + " (HTTP "

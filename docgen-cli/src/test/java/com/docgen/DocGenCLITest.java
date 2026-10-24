@@ -99,6 +99,23 @@ class DocGenCLITest {
     }
 
     @Test
+    void aMissingModelFailsWithInstallInstructionsAndNoDownload() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        DocumentationService service = new DocumentationService(model -> prompt -> {
+            throw new ModelNotInstalledException(LLMProviderFactory.DEFAULT_MODEL);
+        });
+
+        int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("qwen2.5-coder:7b is not installed"), error);
+        assertTrue(error.contains("never downloads"), error);
+        assertTrue(error.contains("ollama pull qwen2.5-coder:7b"), error);
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
     void aPromptTooLargeForTheModelExplainsHowToNarrowTheInput() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
         DocumentationService service = new DocumentationService(model -> prompt -> {

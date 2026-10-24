@@ -88,6 +88,11 @@ public final class DocGenCLI implements Callable<Integer> {
                         + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             }
             return 0;
+        } catch (ModelNotInstalledException missing) {
+            System.err.println("Error: " + safeFailureMessage(missing));
+            System.err.println("Install it first (for example: ollama pull " + SafeText.forTerminal(missing.model())
+                    + "), or pass --model with a model you already have (see: ollama list).");
+            return 1;
         } catch (PromptTooLargeException tooLarge) {
             System.err.println("Error: " + safeFailureMessage(tooLarge));
             System.err.println("Narrow the selection with --include-ext or .docgenignore (preview it with --dry-run),"

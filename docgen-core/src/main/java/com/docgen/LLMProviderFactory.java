@@ -2,7 +2,7 @@ package com.docgen;
 
 /** Creates the local Ollama provider. DocGen has no remote provider. */
 public final class LLMProviderFactory {
-    public static final String DEFAULT_MODEL = "llama3.2";
+    public static final String DEFAULT_MODEL = "qwen2.5-coder:7b";
 
     private LLMProviderFactory() {
     }

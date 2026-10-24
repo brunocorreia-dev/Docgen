@@ -1,6 +1,7 @@
 package com.docgen.api;
 
 import com.docgen.ArchitecturePlanParser;
+import com.docgen.ModelNotInstalledException;
 import com.docgen.PromptTooLargeException;
 import com.docgen.PromptTruncatedException;
 import com.docgen.UnsafeOutputException;
@@ -43,6 +44,9 @@ final class JobFailures {
         if (failure instanceof UnsafeOutputException) {
             return new Failure("unsafe_model_output",
                     "The generated documentation failed the passive Markdown safety checks.");
+        }
+        if (failure instanceof ModelNotInstalledException) {
+            return new Failure("model_not_installed", "The selected model is not installed in Ollama.");
         }
         if (failure instanceof PromptTooLargeException) {
             return new Failure("prompt_too_large", "The input does not fit the model's context window.");

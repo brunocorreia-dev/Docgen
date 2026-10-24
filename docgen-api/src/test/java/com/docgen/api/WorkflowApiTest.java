@@ -194,21 +194,27 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
-    void contextWindowFailuresHaveTheirOwnStableCodes() throws Exception {
+    void modelAndContextFailuresHaveTheirOwnStableCodes() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");
         FakeLlm.enqueue(prompt -> {
             throw new com.docgen.PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768);
         }, prompt -> {
             throw new com.docgen.PromptTruncatedException(2_050, 109_951);
+        }, prompt -> {
+            throw new com.docgen.ModelNotInstalledException("qwen2.5-coder:7b");
         });
 
         JsonNode tooLarge = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
         JsonNode truncated = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+        JsonNode missing = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
 
         assertEquals("prompt_too_large", tooLarge.path("error").path("code").asString());
         assertEquals("prompt_truncated", truncated.path("error").path("code").asString());
-        assertFalse(tooLarge.toString().contains("qwen2.5-coder"), "exception text is never echoed");
+        assertEquals("model_not_installed", missing.path("error").path("code").asString());
+        assertEquals("The input does not fit the model's context window.",
+                tooLarge.path("error").path("message").asString());
+        assertFalse(tooLarge.toString().contains("accepts at most"), "exception text is never echoed");
     }
 
     @Test

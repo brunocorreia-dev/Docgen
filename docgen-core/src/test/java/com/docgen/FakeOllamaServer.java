@@ -36,12 +36,14 @@ final class FakeOllamaServer implements AutoCloseable {
 
     private final HttpServer server;
     private final List<JsonNode> generateRequests = Collections.synchronizedList(new ArrayList<>());
+    private final List<String> requestedPaths = Collections.synchronizedList(new ArrayList<>());
     private volatile Integer modelContextTokens = 32_768;
     private volatile boolean modelInstalled = true;
     private volatile boolean ignoresNumCtx;
 
     FakeOllamaServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/", this::unknown);
         server.createContext("/api/show", this::show);
         server.createContext("/api/generate", this::generate);
         server.start();
@@ -74,6 +76,13 @@ final class FakeOllamaServer implements AutoCloseable {
         }
     }
 
+    /** Every path requested, in order, including ones this fake does not implement (such as a pull). */
+    List<String> requestedPaths() {
+        synchronized (requestedPaths) {
+            return List.copyOf(requestedPaths);
+        }
+    }
+
     static int promptTokens(String prompt) {
         return (int) Math.ceil(prompt.length() / MEASURED_CHARACTERS_PER_TOKEN) + TEMPLATE_TOKENS;
     }
@@ -84,7 +93,14 @@ final class FakeOllamaServer implements AutoCloseable {
         return tokens > windowTokens ? windowTokens / 2 + 2 : tokens;
     }
 
+    private void unknown(HttpExchange exchange) throws IOException {
+        requestedPaths.add(exchange.getRequestURI().getPath());
+        exchange.getRequestBody().readAllBytes();
+        respond(exchange, 404, "{\"error\":\"not implemented by the fake\"}");
+    }
+
     private void show(HttpExchange exchange) throws IOException {
+        requestedPaths.add(exchange.getRequestURI().getPath());
         exchange.getRequestBody().readAllBytes();
         if (!modelInstalled) {
             respond(exchange, 404, "{\"error\":\"model not found\"}");
@@ -100,6 +116,7 @@ final class FakeOllamaServer implements AutoCloseable {
     }
 
     private void generate(HttpExchange exchange) throws IOException {
+        requestedPaths.add(exchange.getRequestURI().getPath());
         JsonNode request = MAPPER.readTree(exchange.getRequestBody().readAllBytes());
         generateRequests.add(request);
         String prompt = request.path("prompt").asText();
