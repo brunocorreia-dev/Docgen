@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Starts the DocGen REST API and web workspace on http://127.0.0.1:${DOCGEN_API_PORT:-8080}.
-# Credentials come from the environment only; see README.md ("DocGen Web").
+# Development helper: starts the DocGen desktop app from a source checkout.
+# The app needs no environment variables: it picks a free port on 127.0.0.1,
+# keeps one instance per user and opens an authorized window in the browser.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JAR="$SCRIPT_DIR/docgen-api/target/docgen-api.jar"
 if [[ ! -f "$JAR" ]]; then
   echo "docgen-server: $JAR not found — run 'mvn package' first." >&2
-  exit 1
-fi
-if [[ -z "${DOCGEN_API_USERNAME:-}" || -z "${DOCGEN_API_PASSWORD:-}" ]]; then
-  echo "docgen-server: set DOCGEN_API_USERNAME and DOCGEN_API_PASSWORD (12+ characters)." >&2
-  echo "  read -rs DOCGEN_API_PASSWORD && export DOCGEN_API_PASSWORD   # keeps it out of shell history" >&2
   exit 1
 fi
 exec java -jar "$JAR" "$@"
