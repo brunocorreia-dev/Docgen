@@ -214,6 +214,9 @@ curl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/Docgen/main/instal
 
 O `install-web.sh` aplica as mesmas verificações do `install.sh` (HTTPS, checksum estrito, Sigstore com `cosign` e as variáveis `INSTALL_DIR`, `DOCGEN_REQUIRE_SIGNATURE` e `DOCGEN_SKIP_SIGNATURE`), mas baixa `docgen-api.jar` e instala o wrapper `docgen-web`. O frontend vem embutido no JAR e é servido pelo próprio Spring Boot.
 
+> [!NOTE]
+> O instalador baixa a **última release publicada (v2.0.0)**, que ainda exige usuário e senha em variáveis de ambiente. A versão em desenvolvimento (3.0.0) abre como app desktop, sem login (veja [Executar no Arch Linux](#executar-no-arch-linux)); ela ainda não tem release, e o `install-web.sh` será substituído pelos instaladores nativos (Fase 7).
+
 ### Compilação pelo código-fonte
 
 ```bash
@@ -356,7 +359,7 @@ O DocGen Web é um workspace local de engenharia assistida por IA: tema escuro, 
 
 ### Executar no Arch Linux
 
-Pela release (sem compilar):
+**Release publicada (v2.0.0)**, que ainda usa usuário e senha:
 
 ```bash
 sudo pacman -S --needed jre21-openjdk curl cosign   # cosign é opcional, mas recomendado
@@ -367,7 +370,7 @@ export DOCGEN_API_PASSWORD
 ~/.local/bin/docgen-web   # abra http://127.0.0.1:8080
 ```
 
-Pelo código-fonte:
+**Versão em desenvolvimento (3.0.0), pelo código-fonte**: sem usuário, sem senha e sem variáveis de ambiente.
 
 ```bash
 # Dependências (Java 21+ e Maven; Node.js só para os testes do frontend)
@@ -384,59 +387,58 @@ git clone https://github.com/brunocorreia-dev/Docgen.git
 cd Docgen
 mvn -B verify
 
-# Credenciais do workspace (a senha não fica no histórico do shell)
-export DOCGEN_API_USERNAME="$USER"
-read -rs -p "Senha (12+ caracteres): " DOCGEN_API_PASSWORD; echo
-export DOCGEN_API_PASSWORD
-
-# Iniciar a API e o workspace
-./docgen-server
-# Abra http://127.0.0.1:8080 no navegador
+# Abrir o app (o mesmo que ./docgen-server)
+java -jar docgen-api/target/docgen-api.jar
 ```
 
-### Configuração por variáveis de ambiente
+O que acontece ao abrir (Implementado na Fase 2, ADR [0001](docs/adr/0001-shell-desktop.md) e [0002](docs/adr/0002-autenticacao-por-token-de-lancamento.md)):
+
+- o servidor sobe só em `127.0.0.1`, numa porta livre escolhida pelo sistema a cada início;
+- o DocGen abre uma janela já autorizada: um Chromium instalado (Chrome, Edge, Chromium ou Brave) em modo app, ou o navegador padrão. A janela recebe um acesso de uso único, válido por 30 segundos, e não existe tela de login;
+- abrir o DocGen de novo com ele já aberto só abre outra janela da mesma instância;
+- **Sair do DocGen** (barra lateral ou Configurações) encerra o app. Sem nenhuma janela aberta por 10 minutos, ele se encerra sozinho, mas nunca durante uma geração;
+- se nenhum navegador puder ser aberto, uma janela do sistema oferece "Copiar link de acesso" (em sessões sem interface gráfica, só uma mensagem no terminal).
+
+Os instaladores com atalho no menu são da Fase 7 (Planejado).
+
+### Configuração (3.0.0)
+
+Nenhuma configuração é necessária. O diretório de dados é privado (`0700` onde há POSIX) e fica em:
+
+| Sistema | Diretório de dados |
+|---|---|
+| Linux | `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` (o mesmo da v2: os dados existentes continuam válidos) |
+| macOS | `~/Library/Application Support/DocGen` |
+| Windows | `%LOCALAPPDATA%\DocGen` (não o perfil móvel `%APPDATA%`, que pode ser copiado para o servidor do domínio) |
+
+Lá ficam o banco H2, a área de staging dos PDFs, a trava de instância única (`instance.lock`), o `instance.json` (porta e segredo de reabertura, `0600`, apagado ao sair) e os logs rotacionados em `logs/` (5 MB por arquivo, 7 dias, 50 MB no total; nunca guardam prompts, respostas, anexos ou tokens).
+
+Variáveis opcionais, para desenvolvimento:
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `DOCGEN_API_USERNAME` | — (obrigatória) | Usuário do workspace (`[A-Za-z0-9._-]{1,64}`). |
-| `DOCGEN_API_PASSWORD` | — (obrigatória) | Senha com 12 a 256 caracteres. |
-| `DOCGEN_API_PORT` | `8080` | Porta. O endereço é sempre `127.0.0.1`. |
-| `DOCGEN_DATA_DIR` | `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` | Diretório privado (`0700`) do banco H2 e do staging de uploads. Precisa ser absoluto. |
+| `DOCGEN_DATA_DIR` | o diretório da tabela acima | Outro diretório de dados. Precisa ser absoluto e normalizado. |
 | `DOCGEN_OLLAMA_PORT` | `11434` | Porta do Ollama local. O host é sempre `127.0.0.1`. |
 | `DOCGEN_JOB_WORKERS` | `2` | Workers simultâneos de IA. |
 | `DOCGEN_JOB_TIMEOUT` | `15m` | Tempo máximo por job. |
 
-Outros limites (anexos, retenção, sessão) ficam em `docgen-api/src/main/resources/application.yml` e podem ser sobrescritos com as propriedades `docgen.*` do Spring Boot. Repositórios do servidor para o endpoint de análise são autorizados pelo operador como `docgen.repositories.<id>=/caminho/absoluto`.
+Outros limites (anexos, retenção, sessão, desligamento por inatividade) ficam em `docgen-api/src/main/resources/application.yml` e podem ser sobrescritos com argumentos `--docgen.*=…`. Repositórios do servidor para o endpoint de análise são autorizados como `docgen.repositories.<id>=/caminho/absoluto`.
 
 ## API REST
 
-Base: `http://127.0.0.1:8080/api/v1`. Autenticação: `Authorization: Bearer <token>` (obtido em `POST /auth/token`) ou HTTP Basic para scripts. Toda requisição `POST`/`PUT` precisa de `Content-Type: application/json` (ou `application/pdf` no upload).
+Base: `http://127.0.0.1:<porta>/api/v1`, com a porta escolhida a cada início. A API serve à interface do app e não a scripts:
 
-```bash
-TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/v1/auth/token \
-  -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$DOCGEN_API_USERNAME\",\"password\":\"$DOCGEN_API_PASSWORD\"}" | jq -r .accessToken)
-
-# Criar um projeto
-PROJECT=$(curl -s -X POST http://127.0.0.1:8080/api/v1/projects \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"API de Estoque","description":"API REST de estoque com Java, Spring Boot e PostgreSQL.","provider":"ollama","model":"qwen2.5-coder:7b"}' | jq -r .id)
-
-# Anexar um PDF (corpo bruto; o nome é só para exibição)
-curl -s -X POST "http://127.0.0.1:8080/api/v1/projects/$PROJECT/attachments" \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/pdf' \
-  -H 'X-Attachment-Name: especificacao.pdf' --data-binary @especificacao.pdf
-
-# Iniciar o planejamento (202 + job) e acompanhar
-JOB=$(curl -s -X POST "http://127.0.0.1:8080/api/v1/projects/$PROJECT/plans" \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' | jq -r .id)
-curl -s "http://127.0.0.1:8080/api/v1/jobs/$JOB" -H "Authorization: Bearer $TOKEN"
-```
+- a única credencial é um **token de sessão** enviado em `Authorization: Bearer`, que nasce da troca de um **token de lançamento** de uso único que o próprio app coloca no endereço da janela (`/launch#<token>`). Não existe usuário, senha nem HTTP Basic, e nenhuma resposta define cookie;
+- por isso, outro processo do computador, sem esse token, recebe `401` em todas as rotas de dados (teste `ProtectedRoutesTest`). Para automação, use a CLI;
+- `POST`/`PUT`/`PATCH`/`DELETE` vindos de outra origem (`Origin` ou `Sec-Fetch-Site`) recebem `403`, e um `Host` diferente de `127.0.0.1:<porta>` ou `localhost:<porta>` recebe `400`;
+- toda requisição `POST`/`PUT` precisa de `Content-Type: application/json` (ou `application/pdf` no upload).
 
 | Recurso | Rotas |
 |---|---|
 | Sistema | `GET /health` |
-| Sessão | `POST /auth/token`, `GET /auth/session`, `DELETE /auth/token` |
+| Sessão | `POST /session` (troca o token de lançamento), `GET /session`, `DELETE /session` |
+| App desktop | `POST /desktop/heartbeat`, `POST /desktop/shutdown`, `POST /desktop/reopen` (só para a segunda execução do app, com o segredo do `instance.json`) |
+| Seus dados | `DELETE /data` ("Apagar todos os meus dados") |
 | Projetos | `POST /projects`, `GET /projects`, `GET/PUT/DELETE /projects/{id}` |
 | Anexos | `POST/GET /projects/{id}/attachments`, `DELETE /projects/{id}/attachments/{attachmentId}` |
 | Planos | `POST/GET /projects/{id}/plans`, `GET /projects/{id}/plans/{planId}`, `POST /projects/{id}/plans/{planId}/approval` |
@@ -469,7 +471,7 @@ Quando uma condição não pode ser verificada com segurança, como um sistema d
 | **Permissões** | Pré-visualizações de prompt usam permissões restritas ao proprietário quando há atributos POSIX disponíveis. |
 | **Respostas dos modelos** | Corpos de erro são descartados e a leitura é limitada. É obrigatório o marcador de conclusão bem-sucedida do Ollama. O corpo NDJSON do Ollama é limitado a 16 MiB. A saída é limitada a 2.000.000 caracteres, passa por verificação Unicode e de caracteres de controle, precisa começar com um H1 e usar Markdown passivo: sem HTML bruto, imagens, autolinks ou esquemas de link que não sejam web ou relativos. |
 | **Inspeção** | `--dry-run` e `--preview-prompt` permitem auditar a seleção e os prompts sem cruzar nenhuma fronteira de rede. |
-| **Aplicação web** | Escuta só em `127.0.0.1`, verifica o Host (contra DNS rebinding), não concede CORS, autentica por token Bearer opaco (sem cookies, sem CSRF possível) com bloqueio progressivo contra força bruta, isola todos os recursos por usuário, valida DTOs estritamente, aplica CSP `script-src 'self'` sem `innerHTML` no frontend e processa PDFs em área privada com limites. Detalhes em [SECURITY.md](SECURITY.md#aplicação-web-docgen-api--docgen-web). |
+| **App desktop** | Escuta só em `127.0.0.1`, numa porta livre; exige `Host` com essa porta (contra DNS rebinding) e a própria origem em requisições que alteram estado; não concede CORS; autentica por token de sessão opaco nascido de um token de lançamento de uso único (sem login, sem cookies, sem Basic); mantém o filtro por dono em todas as consultas; valida DTOs estritamente; aplica CSP `script-src 'self'` sem `innerHTML` no frontend e processa PDFs em área privada com limites. Detalhes em [SECURITY.md](SECURITY.md#aplicação-web-docgen-api--docgen-web). |
 
 ### Limitações dos mecanismos de proteção
 
@@ -594,7 +596,7 @@ A descrição detalhada de cada componente e das fronteiras de segurança está 
 
 ### Estratégia de testes
 
-A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais ao Ollama: os testes da API substituem o provedor por um duplo programável, e os do core usam um Ollama falso em loopback. Contagem atual: **189** testes no core, **16** na CLI, **56** na API e **49** no frontend.
+A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais ao Ollama: os testes da API substituem o provedor por um duplo programável, e os do core usam um Ollama falso em loopback. Contagem atual: **189** testes no core, **16** na CLI, **120** na API (com o launcher desktop) e **60** no frontend.
 
 | Classe de teste | Foco |
 |---|---|
@@ -611,12 +613,14 @@ A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais a
 | `SafeTextTest` | Utilitários de texto seguro. |
 | `ArchitecturePlanParserTest`, `MermaidDiagramTest`, `ProjectPromptBuilderTest`, `UntrustedTextTest` | Validação do plano, separação entre requisitos do usuário e sugestões da IA, Mermaid restrito, isolamento de prompts e normalização de texto. |
 | `ArchitecturePlanningServiceTest`, `ProjectDocumentationServiceTest`, `ProviderJsonModeTest` | Planejamento, escolha do modelo, falhas de provedor, Markdown inseguro, modo JSON e `num_ctx`. |
-| `AuthAndSecurityTest` | Tokens, Basic, bloqueio progressivo, Content-Type obrigatório (CSRF), CORS, Host header, CSP e rotas negadas. |
-| `ProjectApiTest`, `AttachmentApiTest` | CRUD, validação estrita, isolamento entre usuários e upload de PDF (válido, falso, criptografado, sem texto, grande demais, duplicado). |
+| `AuthAndSecurityTest`, `ProtectedRoutesTest`, `LaunchTokenServiceTest`, `SessionTokenServiceTest` | Token de lançamento de uso único (validade, reuso que encerra a sessão), sessão de 12 h só em memória, Basic recusado, nenhum cookie, `401` em **todas** as rotas mapeadas sem sessão, `Origin`/`Sec-Fetch-Site` cruzados, `Host` com outra porta, Content-Type obrigatório, CORS, CSP e rotas negadas. |
+| `DesktopApiTest`, `DataErasureApiTest`, `LocalDatabaseTest` | Reabertura só com o segredo da instância e nunca vinda de navegador, heartbeat, "Sair do DocGen", desligamento após 10 min sem janela (nunca durante uma geração, com relógio controlado) e "Apagar todos os meus dados" com compactação do banco. |
+| `DesktopLauncherTest`, `InstanceLockTest`, `InstanceFileTest`, `AppDirectoriesTest`, `BrowserOpenerTest` | Launcher real em processo: porta livre, janela autenticada, segunda execução que só reabre, saída que libera a trava e permite reiniciar limpo, `instance.json` deixado por queda, trava entre processos, diretórios por SO e abertura do navegador sem shell. |
+| `ProjectApiTest`, `AttachmentApiTest` | CRUD, validação estrita, linhas de outro dono invisíveis e upload de PDF (válido, falso, criptografado, sem texto, grande demais, duplicado). |
 | `WorkflowApiTest`, `JobTimeoutTest` | Fluxo ponta a ponta (PDF → plano → aprovação → documentação → edição → exportação), ausência de envio remoto, falhas saneadas (incluindo contexto e modelo ausente), cancelamento, limites e timeout. |
-| `LocalOnlyArchitectureTest`, `MigrationTest`, `OllamaPropertiesTest` | Regra de arquitetura "somente local" sobre o código de todos os módulos, migração V2 e porta do Ollama. |
+| `LocalOnlyArchitectureTest`, `MigrationTest`, `OllamaPropertiesTest` | Regra de arquitetura "somente local" sobre o código de todos os módulos (o único cliente de rede além do Ollama é o de reabertura, também em loopback), migrações V2 e V3 e porta do Ollama. |
 | `DocGenApiApplicationTest`, `AuthorizedRepositoryRegistryTest` | Endpoints da Fase 02 e registro de repositórios autorizados. |
-| `docgen-web/src/test/js/*.test.mjs` | DOM seguro, allowlist de URLs, Markdown, layout do diagrama, cliente HTTP, polling, validação, rotas, varredura estática de sinks proibidos e de URLs externas, e a configuração da Vercel. |
+| `docgen-web/src/test/js/*.test.mjs` | DOM seguro, allowlist de URLs, Markdown, layout do diagrama, cliente HTTP, página `/launch` (o fragmento sai da barra de endereços antes da troca), heartbeat, polling, validação, rotas, varredura estática de sinks proibidos, de URLs externas e de cookies, e a configuração da Vercel. |
 
 ```bash
 mvn -B test                                        # testes Java de todos os módulos
@@ -709,7 +713,7 @@ Histórico recente:
 1. **Fase 01**: extração do `DocumentationService` reutilizável.
 2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
 3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
-4. **3.0.0 (em desenvolvimento)**: realinhamento como app desktop de IA local. Implementado: somente Ollama, sem provedor remoto, com janela de contexto explícita e modelo padrão `qwen2.5-coder:7b`. Planejado: launcher desktop sem login, chat com streaming, gerenciador de modelos Qwen, anexos no chat e instaladores.
+4. **3.0.0 (em desenvolvimento)**: realinhamento como app desktop de IA local. Implementado: somente Ollama, sem provedor remoto, com janela de contexto explícita e modelo padrão `qwen2.5-coder:7b` (Fase 1); launcher desktop sem login, com instância única, porta livre, token de lançamento, desligamento por inatividade e "Apagar todos os meus dados" (Fase 2). Planejado: chat com streaming, gerenciador de modelos Qwen, anexos no chat e instaladores.
 
 Próximos passos considerados (ainda não implementados):
 
