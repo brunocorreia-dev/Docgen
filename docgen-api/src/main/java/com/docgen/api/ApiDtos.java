@@ -12,21 +12,6 @@ final class ApiDtos {
     record HealthResponse(String status) {
     }
 
-    record ProviderResponse(List<ProviderItem> providers) {
-        ProviderResponse {
-            providers = List.copyOf(providers);
-        }
-    }
-
-    /**
-     * Static provider metadata. {@code enabled} reflects the operator's remote
-     * gate; {@code configured} only says whether a server-side key exists. The
-     * key itself never leaves the server.
-     */
-    record ProviderItem(String id, boolean remote, String defaultModel, boolean enabled, boolean configured,
-                        boolean requiresConsent) {
-    }
-
     record RepositoryAnalysisRequest(
             @Size(max = 32)
             List<@Pattern(regexp = "[A-Za-z0-9][A-Za-z0-9+_-]{0,15}") String> includeExtensions

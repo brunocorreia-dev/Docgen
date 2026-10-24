@@ -46,22 +46,15 @@ export async function renderSettings(ctx) {
       h('h2', null, icon('shield'), 'Privacidade e segurança'),
       h('ul', { class: 'bullet-list' },
         h('li', null, 'O servidor escuta apenas em 127.0.0.1 e exige autenticação em todas as rotas de dados.'),
-        h('li', null, 'A chave da Groq existe só no servidor (GROQ_API_KEY); o navegador nunca a recebe.'),
-        h('li', null, 'Envios para provedores remotos exigem sua confirmação explícita para cada operação, com o conteúdo exato que será transmitido.'),
+        h('li', null, 'A IA roda só no Ollama deste computador (127.0.0.1). Nenhum conteúdo é enviado para serviços externos.'),
         h('li', null, 'PDFs são processados em área privada e removidos logo após a extração; apenas o texto redigido é guardado, por até 30 dias.'),
         h('li', null, 'Resultados da IA são propostas: revise antes de usar. Nada é apresentado como implementado.')))));
 
   try {
-    const [health, providers] = await Promise.all([ctx.api.health(), ctx.providers()]);
-    replace(server, 
+    const health = await ctx.api.health();
+    replace(server,
       h('dt', null, 'API'), h('dd', null, health.status === 'available' ? 'Disponível' : health.status),
-      ...providers.flatMap((provider) => [
-        h('dt', null, provider.id === 'groq' ? 'Groq' : 'Ollama'),
-        h('dd', null, [provider.remote ? 'Remoto' : 'Local', `modelo padrão ${provider.defaultModel}`,
-          provider.enabled ? 'habilitado' : 'desativado pelo operador',
-          provider.remote ? (provider.configured ? 'chave configurada no servidor' : 'GROQ_API_KEY ausente') : null]
-          .filter(Boolean).join(' · ')),
-      ]));
+      h('dt', null, 'Ollama'), h('dd', null, 'Local · 127.0.0.1'));
   } catch (failure) {
     replace(server, h('dt', null, 'API'), h('dd', null, errorMessage(failure)));
   }

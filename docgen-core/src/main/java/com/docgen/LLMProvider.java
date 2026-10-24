@@ -1,5 +1,6 @@
 package com.docgen;
 
+/** A language model served by the local Ollama instance. */
 public interface LLMProvider {
     String generateDocumentation(String prompt) throws Exception;
 
@@ -11,9 +12,11 @@ public interface LLMProvider {
         return generateDocumentation(prompt);
     }
 
-    /** True when prompts leave the local machine. Drives consent checks and warnings. */
-    boolean isRemote();
-
-    /** Human-readable destination of prompts, shown in warnings before sending. */
-    String describeDestination();
+    /**
+     * Fails before any generation starts when one of the prompts cannot be
+     * answered, for example because it does not fit the model's context window,
+     * so that callers never announce work that cannot start.
+     */
+    default void requireFits(String... prompts) throws Exception {
+    }
 }

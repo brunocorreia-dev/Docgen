@@ -18,7 +18,7 @@ public final class SecretRedactor {
             "-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----");
     private static final List<Pattern> TOKEN_PATTERNS = List.of(
             // Provider-prefixed API tokens (cloud / SaaS)
-            Pattern.compile("\\bgsk_[A-Za-z0-9_\\-]{20,}\\b"),                                   // Groq
+            Pattern.compile("\\bgsk_[A-Za-z0-9_\\-]{20,}\\b"),                                   // gsk_ LLM API keys
             Pattern.compile("\\bsk-[A-Za-z0-9_\\-]{20,}\\b"),                                    // OpenAI, Anthropic (sk-ant-...)
             Pattern.compile("\\bghp_[A-Za-z0-9_]{20,}\\b"),                                      // GitHub classic PAT
             Pattern.compile("\\bgithub_pat_[A-Za-z0-9_]{20,}\\b"),                               // GitHub fine-grained PAT

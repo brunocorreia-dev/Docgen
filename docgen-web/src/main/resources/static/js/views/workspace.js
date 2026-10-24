@@ -4,12 +4,11 @@ import { h, replace } from '../dom.js';
 import { icon } from '../icons.js';
 import { href } from '../router.js';
 import { errorMessage, jobErrorMessage, PLAN_STATUS } from '../messages.js';
-import { formatDate } from '../format.js';
+import { formatDate, providerLabel } from '../format.js';
 import { pollJob } from '../jobs.js';
 import { button, confirmDialog, emptyState, errorState, loadingState, openDialog, toast } from '../ui.js';
 import { attachmentsPanel } from '../components/attachments.js';
 import { activityList } from '../components/activity.js';
-import { requestConsent } from '../components/consent.js';
 import { architecturePanel, planHeader, roadmapPanel, summaryPanel } from '../components/plan-view.js';
 import { diagramPanel } from '../components/diagram-view.js';
 import { docsPanel } from '../components/docs-view.js';
@@ -33,7 +32,6 @@ export async function renderWorkspace(ctx) {
     plans: [],
     jobs: [],
     artifacts: [],
-    providers: [],
     plan: null,
     tab: ctx.params.tab || 'summary',
     artifactId: ctx.params.artifactId || null,
@@ -41,17 +39,16 @@ export async function renderWorkspace(ctx) {
   };
 
   try {
-    const [project, attachments, plans, jobs, artifacts, providers] = await Promise.all([
+    const [project, attachments, plans, jobs, artifacts] = await Promise.all([
       ctx.api.getProject(projectId),
       ctx.api.listAttachments(projectId),
       ctx.api.listPlans(projectId),
       ctx.api.listJobs(projectId),
       ctx.api.listArtifacts(projectId),
-      ctx.providers().catch(() => []),
     ]);
     Object.assign(state, {
       project, attachments: attachments.attachments, plans: plans.plans, jobs: jobs.jobs,
-      artifacts: artifacts.artifacts, providers,
+      artifacts: artifacts.artifacts,
     });
   } catch (failure) {
     ctx.setView(failure.code === 'not_found'
@@ -73,19 +70,16 @@ export async function renderWorkspace(ctx) {
       h('div', { class: 'workspace-main' }, briefCard, attachmentsCard, aiCard, activityCard),
       h('div', { class: 'workspace-results' }, results))));
 
-  const activeProvider = () => state.providers.find((provider) => provider.id === state.project.provider)
-    || { id: state.project.provider, remote: state.project.provider === 'groq', enabled: true, configured: true, defaultModel: '' };
   const hasActive = (type) => state.jobs.some((job) => job.type === type && (job.status === 'QUEUED' || job.status === 'RUNNING'));
 
   function renderHeader() {
-    const provider = activeProvider();
     replace(header, 
       h('div', { class: 'workspace-title' },
         h('a', { class: 'link back-link', href: href('projects') }, icon('chevron', { size: 14, className: 'flip' }), 'Projetos'),
         h('h1', null, state.project.name),
         h('div', { class: 'chip-row' },
-          h('span', { class: 'chip' }, icon(provider.remote ? 'cloud' : 'server', { size: 14 }),
-            `${provider.id === 'groq' ? 'Groq' : 'Ollama'} · ${state.project.model || provider.defaultModel || 'modelo padrão'}`),
+          h('span', { class: 'chip' }, icon('server', { size: 14 }),
+            `${providerLabel(state.project.provider)} · ${state.project.model || 'modelo padrão'}`),
           h('span', { class: 'chip' }, state.project.outputLanguage === 'en' ? 'Documentação em inglês' : 'Documentação em português'),
           h('span', { class: 'chip' }, `Criado em ${formatDate(state.project.createdAt)}`))),
       h('div', { class: 'page-actions' },
@@ -128,19 +122,13 @@ export async function renderWorkspace(ctx) {
   }
 
   function renderAiCard() {
-    const provider = activeProvider();
     const planning = hasActive('ARCHITECTURE_PLAN');
     replace(aiCard, 
       h('header', { class: 'card-header' }, h('h2', null, icon('sparkles', { size: 17 }), 'Análise com IA')),
       h('div', { class: 'card-body' },
-        h('p', { class: 'muted' }, provider.remote
-          ? 'Provedor remoto: antes do envio você verá exatamente o que será transmitido e precisará autorizar.'
-          : 'Provedor local: o conteúdo é enviado apenas para o Ollama em 127.0.0.1.'),
-        !provider.enabled ? h('div', { class: 'callout callout-warning' }, icon('alert', { size: 16 }), h('span', null, 'Este provedor está desativado no servidor. Edite o projeto e escolha outro.')) : null,
-        provider.remote && provider.enabled && !provider.configured ? h('div', { class: 'callout callout-warning' }, icon('alert', { size: 16 }),
-          h('span', null, 'GROQ_API_KEY não está configurada no servidor; a geração vai falhar.')) : null,
+        h('p', { class: 'muted' }, 'O conteúdo é processado só pelo Ollama deste computador, em 127.0.0.1.'),
         h('div', { class: 'ai-actions' },
-          h('button', { class: ['button', 'button-primary', 'button-glow', planning && 'is-busy'], type: 'button', disabled: planning || !provider.enabled, on: { click: startPlanning } },
+          h('button', { class: ['button', 'button-primary', 'button-glow', planning && 'is-busy'], type: 'button', disabled: planning, on: { click: startPlanning } },
             icon('sparkles'), h('span', null, planning ? 'Analisando requisitos…' : state.plans.length ? 'Gerar novo plano' : 'Analisar e gerar plano')),
           h('a', { class: 'button button-ghost', href: href('project', { projectId, tab: 'docs' }) }, icon('file'), h('span', null, 'Documentação')))));
   }
@@ -253,23 +241,9 @@ export async function renderWorkspace(ctx) {
     renderResults();
   }
 
-  async function transmissionConsent(operation, planId) {
-    const provider = activeProvider();
-    if (!provider.remote) return { consentToken: null };
-    const preview = await ctx.api.previewTransmission(projectId, { operation, planId });
-    if (!preview.remoteEnabled) throw Object.assign(new Error('remote'), { code: 'remote_disabled' });
-    const approved = await requestConsent(preview, operation === 'PLAN' ? 'O planejamento arquitetural' : 'A geração da documentação');
-    return approved ? { consentToken: preview.consentToken } : null;
-  }
-
   async function startPlanning() {
     try {
-      const consent = await transmissionConsent('PLAN');
-      if (!consent) {
-        toast('Envio cancelado. Nada foi transmitido.', { tone: 'info' });
-        return;
-      }
-      const job = await ctx.api.startPlanning(projectId, consent.consentToken ? { consentToken: consent.consentToken } : {});
+      const job = await ctx.api.startPlanning(projectId, {});
       toast('Análise iniciada. O plano aparece aqui quando estiver pronto.', { tone: 'info' });
       track(job);
     } catch (failure) {
@@ -280,12 +254,7 @@ export async function renderWorkspace(ctx) {
   async function startDocumentation() {
     if (!state.plan) return;
     try {
-      const consent = await transmissionConsent('DOCUMENTATION', state.plan.id);
-      if (!consent) {
-        toast('Envio cancelado. Nada foi transmitido.', { tone: 'info' });
-        return;
-      }
-      const job = await ctx.api.startDocumentation(projectId, { planId: state.plan.id, ...(consent.consentToken ? { consentToken: consent.consentToken } : {}) });
+      const job = await ctx.api.startDocumentation(projectId, { planId: state.plan.id });
       toast('Gerando README.md e ARCHITECTURE.md…', { tone: 'info' });
       track(job);
     } catch (failure) {
@@ -357,7 +326,6 @@ export async function renderWorkspace(ctx) {
     let closeDialog = () => {};
     const { form } = projectForm({
       initial: state.project,
-      providers: state.providers,
       submitLabel: 'Salvar alterações',
       onSubmit: async (payload) => {
         try {

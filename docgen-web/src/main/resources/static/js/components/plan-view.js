@@ -2,7 +2,7 @@
 // are labelled so user-provided facts stay distinct from AI suggestions.
 import { h } from '../dom.js';
 import { icon } from '../icons.js';
-import { formatDate } from '../format.js';
+import { formatDate, providerLabel } from '../format.js';
 import { COMPONENT_TYPE, IMPACT, PLAN_STATUS, SOURCE_LABEL } from '../messages.js';
 import { aiNotice, badge } from '../ui.js';
 
@@ -32,7 +32,7 @@ export function planHeader(planView, { onApprove }) {
   return h('div', { class: ['plan-status', approved ? 'is-approved' : 'is-draft'] },
     h('div', { class: 'plan-status-text' },
       badge(PLAN_STATUS[planView.status] || planView.status, approved ? 'success' : 'warning', approved ? 'check' : 'eye'),
-      h('small', { class: 'muted' }, `Gerado em ${formatDate(planView.createdAt)} por ${planView.provider === 'groq' ? 'Groq' : 'Ollama'} (${planView.model || 'modelo padrão'})`
+      h('small', { class: 'muted' }, `Gerado em ${formatDate(planView.createdAt)} por ${providerLabel(planView.provider)} (${planView.model || 'modelo padrão'})`
         + (approved ? ` · aprovado em ${formatDate(planView.approvedAt)}` : ''))),
     !approved && onApprove ? h('button', { class: 'button button-primary button-small', type: 'button', on: { click: onApprove } },
       icon('check', { size: 15 }), h('span', null, 'Revisei e aprovo')) : null);

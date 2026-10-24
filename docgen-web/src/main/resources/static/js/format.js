@@ -42,6 +42,12 @@ export function truncate(text, max) {
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
+/** Ollama is the only provider; other names only appear in records created before DocGen 3. */
+export function providerLabel(provider) {
+  if (provider === 'ollama') return 'Ollama';
+  return typeof provider === 'string' && provider ? provider : '—';
+}
+
 export function pluralize(count, singular, plural) {
   return `${formatNumber(count)} ${count === 1 ? singular : plural}`;
 }

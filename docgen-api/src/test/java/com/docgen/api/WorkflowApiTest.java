@@ -1,5 +1,6 @@
 package com.docgen.api;
 
+import com.docgen.LLMProviderFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -15,7 +16,6 @@ import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -127,73 +127,41 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
-    void remoteProvidersNeedOperationSpecificSingleUseConsent() throws Exception {
-        String token = token();
-        String project = createProject(token, "groq");
-        String previewBody = "{\"operation\":\"PLAN\"}";
-
-        mvc.perform(authed(post("/api/v1/projects/" + project + "/plans"), token)
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("consent_required"));
-        assertTrue(FakeLlm.prompts().isEmpty(), "nothing may be transmitted without consent");
-
-        JsonNode preview = json(authed(post("/api/v1/projects/" + project + "/transmission-previews"), token)
-                .contentType(MediaType.APPLICATION_JSON).content(previewBody), 200);
-        assertTrue(preview.path("remote").asBoolean());
-        assertEquals("Fake Groq (remote test double)", preview.path("destination").asString());
-        assertTrue(preview.path("characterCount").asInt() > 0);
-        String consent = preview.path("consentToken").asString();
-        assertNotNull(consent);
-
-        String intruder = token(OTHER, OTHER_PASSWORD);
-        String intruderProject = createProject(intruder, "groq");
-        mvc.perform(authed(post("/api/v1/projects/" + intruderProject + "/plans"), intruder)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"consentToken\":\"" + consent + "\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("consent_invalid"));
-
-        String fresh = json(authed(post("/api/v1/projects/" + project + "/transmission-previews"), token)
-                .contentType(MediaType.APPLICATION_JSON).content(previewBody), 200).path("consentToken").asString();
-        FakeLlm.enqueue(prompt -> validPlanJson());
-        JsonNode job = startPlan(token, project, "{\"consentToken\":\"" + fresh + "\"}", 202);
-        assertEquals("SUCCEEDED", awaitJob(token, job.path("id").asString()).path("status").asString());
-
-        mvc.perform(authed(post("/api/v1/projects/" + project + "/plans"), token)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"consentToken\":\"" + fresh + "\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("consent_invalid"));
-    }
-
-    @Test
-    void consentBecomesStaleWhenTheProjectChanges() throws Exception {
-        String token = token();
-        String project = createProject(token, "groq");
-        String consent = json(authed(post("/api/v1/projects/" + project + "/transmission-previews"), token)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"PLAN\"}"), 200)
-                .path("consentToken").asString();
-
-        json(authed(put("/api/v1/projects/" + project), token).contentType(MediaType.APPLICATION_JSON)
-                .content(projectJson("Inventory API v2", "groq")), 200);
-
-        mvc.perform(authed(post("/api/v1/projects/" + project + "/plans"), token)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"consentToken\":\"" + consent + "\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("consent_stale"));
-        assertTrue(FakeLlm.prompts().isEmpty());
-    }
-
-    @Test
-    void localProvidersDoNotIssueConsentTokens() throws Exception {
+    void planningRunsLocallyWithoutAnyTransmissionPreviewOrConsent() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");
 
-        JsonNode preview = json(authed(post("/api/v1/projects/" + project + "/transmission-previews"), token)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"PLAN\"}"), 200);
+        mvc.perform(authed(post("/api/v1/projects/" + project + "/transmission-previews"), token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"PLAN\"}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(authed(post("/api/v1/projects/" + project + "/plans"), token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"consentToken\":\"anything\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(authed(post("/api/v1/projects/" + project + "/plans"), token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"provider\":\"remote-cloud\"}"))
+                .andExpect(status().isBadRequest());
+        assertTrue(FakeLlm.prompts().isEmpty());
 
-        assertFalse(preview.path("remote").asBoolean());
-        assertTrue(preview.path("consentToken").isNull());
-        assertEquals("llama3.2", preview.path("model").asString());
+        FakeLlm.enqueue(prompt -> validPlanJson());
+        JsonNode job = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("SUCCEEDED", job.path("status").asString(), job.toString());
+        assertEquals("ollama", job.path("provider").asString());
+        assertEquals(LLMProviderFactory.DEFAULT_MODEL, job.path("model").asString());
+        assertEquals(java.util.Collections.singletonList(null), FakeLlm.models());
+    }
+
+    @Test
+    void theRequestModelOverridesTheProjectModel() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> validPlanJson());
+
+        JsonNode job = awaitJob(token, startPlan(token, project, "{\"model\":\"qwen2.5-coder:7b\"}", 202)
+                .path("id").asString());
+
+        assertEquals("qwen2.5-coder:7b", job.path("model").asString());
+        assertEquals(java.util.List.of("qwen2.5-coder:7b"), FakeLlm.models());
     }
 
     @Test
@@ -223,6 +191,30 @@ class WorkflowApiTest extends ApiTestSupport {
         assertEquals("provider_failed", job.path("error").path("code").asString());
         assertFalse(job.toString().contains("/home/user/private"));
         assertFalse(job.toString().contains("secret prompt"));
+    }
+
+    @Test
+    void modelAndContextFailuresHaveTheirOwnStableCodes() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> {
+            throw new com.docgen.PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768);
+        }, prompt -> {
+            throw new com.docgen.PromptTruncatedException(2_050, 109_951);
+        }, prompt -> {
+            throw new com.docgen.ModelNotInstalledException("qwen2.5-coder:7b");
+        });
+
+        JsonNode tooLarge = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+        JsonNode truncated = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+        JsonNode missing = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("prompt_too_large", tooLarge.path("error").path("code").asString());
+        assertEquals("prompt_truncated", truncated.path("error").path("code").asString());
+        assertEquals("model_not_installed", missing.path("error").path("code").asString());
+        assertEquals("The input does not fit the model's context window.",
+                tooLarge.path("error").path("message").asString());
+        assertFalse(tooLarge.toString().contains("accepts at most"), "exception text is never echoed");
     }
 
     @Test

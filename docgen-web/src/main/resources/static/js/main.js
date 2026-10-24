@@ -25,7 +25,6 @@ const api = createApi({
 
 let shell = null;
 let viewController = null;
-let providersPromise = null;
 
 const NAV = [
   ['dashboard', 'Dashboard', 'dashboard'],
@@ -35,20 +34,9 @@ const NAV = [
   ['settings', 'Configurações', 'settings'],
 ];
 
-function providers() {
-  if (!providersPromise) {
-    providersPromise = api.providers().then((data) => data.providers).catch((failure) => {
-      providersPromise = null;
-      throw failure;
-    });
-  }
-  return providersPromise;
-}
-
 async function logout() {
   await api.logout().catch(() => {});
   shell = null;
-  providersPromise = null;
   location.hash = '#/login';
 }
 
@@ -144,7 +132,6 @@ async function route() {
     api,
     params: current.params,
     signal,
-    providers,
     username: () => tokenStore.username(),
     logout,
     setTitle,

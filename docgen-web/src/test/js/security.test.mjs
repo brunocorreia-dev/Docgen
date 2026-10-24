@@ -47,3 +47,24 @@ test('stylesheets do not import remote resources', () => {
     assert.ok(!/@import|url\(\s*['"]?https?:/i.test(css), `${file} loads a remote resource`);
   }
 });
+
+// ADR 0003: the workspace talks only to its own origin. A URL-shaped string is
+// allowed only when it is an identifier that is never requested.
+const NEVER_FETCHED = new Set(['http://www.w3.org/2000/svg']);
+
+test('sources contain no absolute URL other than never-fetched identifiers', () => {
+  const sources = [...files(join(STATIC, 'js'), '.js'), ...files(STATIC, '.html'), ...files(STATIC, '.svg'), ...files(STATIC, '.css')];
+  for (const file of sources) {
+    for (const match of readFileSync(file, 'utf8').matchAll(/https?:\/\/[^\s"'`<>)\]]*/gi)) {
+      assert.ok(NEVER_FETCHED.has(match[0]), `${file} references ${match[0]}`);
+    }
+  }
+});
+
+test('the API client only requests same-origin /api/ paths', () => {
+  const client = readFileSync(join(STATIC, 'js', 'api.js'), 'utf8');
+  const paths = [...client.matchAll(/request\(\s*'[A-Z]+',\s*[`']([^`']+)[`']/g), ...client.matchAll(/post\(\s*[`']([^`']+)[`']/g)]
+    .map((match) => match[1]);
+  assert.ok(paths.length > 10, 'the client paths were found');
+  for (const path of paths) assert.ok(path.startsWith('/api/v1/'), `${path} is not a same-origin API path`);
+});

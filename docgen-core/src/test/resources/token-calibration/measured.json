@@ -1,0 +1,25 @@
+{
+  "description": "Prompt tokens Ollama reported (prompt_eval_count) for each file sent alone to /api/generate. PromptTokens.estimate must never be lower.",
+  "model": "qwen2.5:14b (Qwen2.5 tokenizer, family of qwen2.5-coder)",
+  "ollama": "0.32.11",
+  "measuredOn": "2026-10-24",
+  "request": {
+    "num_ctx": 16384,
+    "num_predict": 1,
+    "temperature": 0
+  },
+  "note": "Counts include the model's chat template (default system prompt).",
+  "samples": {
+    "prose-ptbr.txt": 1822,
+    "code-java.txt": 1388,
+    "code-js.txt": 1830,
+    "cjk.txt": 779,
+    "emoji-ptbr.txt": 1569,
+    "base64.txt": 4476,
+    "hex.txt": 5274,
+    "csv-numbers.txt": 6508,
+    "svg-path.txt": 6919,
+    "punctuation.txt": 2663,
+    "json-ptbr.txt": 1707
+  }
+}

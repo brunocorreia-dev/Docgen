@@ -19,10 +19,6 @@ const ERRORS = {
   pdf_too_many_pages: 'O PDF excede o limite de páginas.',
   pdf_no_text: 'O PDF não tem texto extraível. Documentos digitalizados (OCR) ainda não são suportados.',
   pdf_timeout: 'O PDF demorou demais para ser processado.',
-  remote_disabled: 'Provedores remotos estão desativados neste servidor (DOCGEN_ALLOW_REMOTE).',
-  consent_required: 'Este provedor envia dados para um serviço remoto. Revise e autorize a transmissão.',
-  consent_invalid: 'A autorização de envio expirou ou é inválida. Revise a transmissão novamente.',
-  consent_stale: 'O projeto mudou depois da revisão. Revise a transmissão novamente.',
   plan_not_approved: 'Aprove o plano arquitetural antes de gerar a documentação.',
   plan_state_changed: 'O plano foi alterado durante a aprovação. Recarregue a página.',
   too_many_jobs: 'Há muitas tarefas em andamento. Aguarde a conclusão de alguma delas.',
@@ -41,16 +37,14 @@ const JOB_ERRORS = {
   cancelled: 'A tarefa foi cancelada.',
   interrupted: 'O servidor foi reiniciado antes da conclusão da tarefa.',
   timeout: 'A tarefa excedeu o tempo limite.',
-  consent_required: 'O envio remoto não foi autorizado.',
   invalid_model_output: 'O modelo não retornou um plano arquitetural válido. Tente novamente ou use outro modelo.',
   unsafe_model_output: 'A documentação gerada foi bloqueada pelas verificações de segurança de Markdown.',
-  provider_timeout: 'O provedor de IA não respondeu a tempo.',
-  provider_unavailable: 'O provedor de IA não está acessível. Para Ollama, confirme que o serviço está rodando em 127.0.0.1:11434.',
-  provider_not_configured: 'O provedor de IA não está configurado no servidor (GROQ_API_KEY).',
-  provider_rate_limited: 'O limite de uso do provedor de IA foi atingido. Aguarde e tente novamente.',
-  provider_rejected: 'O provedor de IA recusou as credenciais configuradas no servidor.',
-  provider_payload_too_large: 'O conteúdo é grande demais para o provedor. Reduza a descrição ou os anexos.',
-  provider_failed: 'A requisição ao provedor de IA falhou.',
+  provider_timeout: 'O Ollama não respondeu a tempo. Modelos grandes podem demorar no primeiro uso; tente novamente.',
+  provider_unavailable: 'O Ollama não está acessível neste computador. Abra o Ollama e tente novamente.',
+  provider_failed: 'A requisição ao Ollama falhou. Tente novamente.',
+  model_not_installed: 'O modelo escolhido não está instalado no Ollama. Instale-o pelo Ollama ou escolha outro modelo no projeto. O DocGen não baixa modelos sozinho.',
+  prompt_too_large: 'O conteúdo não cabe na janela de contexto do modelo. Reduza a descrição ou os anexos, ou escolha um modelo com contexto maior.',
+  prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',
 };
 
@@ -103,12 +97,6 @@ export const COMPONENT_TYPE = {
 };
 
 export const IMPACT = { LOW: 'Baixo', MEDIUM: 'Médio', HIGH: 'Alto' };
-
-export const INCLUDED_DATA = {
-  project_brief: 'Nome, descrição, requisitos, tecnologias e restrições do projeto',
-  attachment_text: 'Texto extraído dos PDFs anexados (com segredos redigidos)',
-  approved_plan: 'Plano arquitetural aprovado',
-};
 
 export const ARTIFACT_LABEL = {
   README: 'README.md',

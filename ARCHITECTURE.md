@@ -17,8 +17,7 @@ flowchart LR
     API["docgen-api<br/>Spring Boot"] --> CORE
     API -->|"serve classpath:/static"| WEB["docgen-web<br/>HTML/CSS/JS"]
     WEB -->|"fetch /api/v1 (Bearer)"| API
-    CORE -->|"HTTPS"| GROQ["Groq API"]
-    CORE -->|"HTTP loopback"| OLLAMA["Ollama 127.0.0.1:11434"]
+    CORE -->|"HTTP loopback, num_ctx explícito"| OLLAMA["Ollama 127.0.0.1"]
     API --> H2[("H2 embutido<br/>~/.local/share/docgen")]
 ```
 
@@ -38,22 +37,23 @@ DocGenCLI / RepositoryAnalysisService
       -> PromptBuilder
       -> [pré-visualização de prompt termina aqui, antes de existir provedor]
       -> LLMProviderFactory
-          -> GroqProvider | OllamaProvider
+          -> OllamaProvider (127.0.0.1, num_ctx explícito)
       -> DocumentationValidator
       -> OutputWriter (revalida antes da publicação)
   -> DocumentationResult
 ```
 
-- `DocumentationService` orquestra varredura, verificação de seleção vazia, preflight de persistência, construção de prompts, seleção de provedor, callback de autorização remota, validação de resposta e publicação opcional. Emite progresso por interface e propaga exceções sem escrever no terminal.
+- `DocumentationService` orquestra varredura, verificação de seleção vazia, preflight de persistência, construção de prompts, criação do provedor local, validação de resposta e publicação opcional. Emite progresso por interface e propaga exceções sem escrever no terminal.
 - `DocumentationRequest` é uma entrada tipada do servidor. Seus caminhos são configuração confiável, nunca campos de HTTP: a API resolve identificadores autorizados (`docgen.repositories`) em caminhos. `DocumentationResult` devolve metadados relativos e artefatos gerados, sem caminhos absolutos nem código-fonte bruto.
 - `RepoScanner` percorre a árvore somente por handles `SecureDirectoryStream`, rejeita symlinks e sistemas de arquivos inseguros, aplica exclusões internas, de ignore e de allowlist de forma determinística, redige o arquivo completo e limitado antes do truncamento e impõe limites de entradas, profundidade, quantidade de arquivos, caminho, árvore, metadados e conteúdo. Apenas os pulos por limite de conteúdo chegam ao modelo.
 - `DocgenIgnore` carrega `.docgenignore` (raiz) e os `.gitignore` da raiz e aninhados por handles seguros. O matcher iterativo suporta curingas comuns do Git sem backtracking de regex, reserva orçamentos globais de globs, segmentos e NFA antes de compilar e impede que negações de diretório cancelem regras mais específicas de filhos. `.docgenignore` só exclui.
 - `SecretRedactor` centraliza a remoção best-effort de tokens de nuvem e SaaS, blocos de chave privada, credenciais em URLs, cabeçalhos de autorização e atribuições de credenciais.
 - `PromptBuilder` redige todo conteúdo, caminho e metadado visível no prompt, envolve o snapshot em delimitadores de dado não confiável, neutraliza tags que imitam esses delimitadores e reafirma as regras após o bloco de dados. Exige Markdown passivo.
 - `RepoContext` carrega o snapshot e separa pulos visíveis no prompt (limites de tamanho) de exclusões apenas locais (arquivos sensíveis ou ignorados), cujos nomes nunca chegam ao prompt.
-- `LLMProvider` é a abstração de provedor. As implementações declaram `isRemote()` e `describeDestination()`, que alimentam a fronteira obrigatória de consentimento remoto. `generateStructured()` pede um único objeto JSON e ativa o modo JSON do provedor quando existe (`response_format: json_object` no Groq, `format: json` no Ollama).
-- `GroqProvider` chama o endpoint HTTPS fixo do Groq com retentativas limitadas, descarta corpos de erro, limita os bytes da resposta e exige `finish_reason: stop`.
-- `OllamaProvider` chama endpoints fixos em `127.0.0.1` sem proxy do sistema, recebe a resposta completa dentro do timeout HTTP com teto de 16 MiB, limita linhas, fragmentos e saída NDJSON e exige marcador de conclusão.
+- `LLMProvider` é a abstração do modelo local; a única implementação é o `OllamaProvider`. `generateStructured()` pede um único objeto JSON e ativa o modo JSON do Ollama (`format: json`).
+- `OllamaEndpoint` fixa o host no literal `127.0.0.1` (sem resolução de nome e sem configuração); só a porta muda (padrão `11434`, `--ollama-port` na CLI e `docgen.ollama.port` na API).
+- `OllamaProvider` consulta `/api/show` para obter o contexto máximo do modelo (`<arquitetura>.context_length`), envia `num_ctx` (estimativa do prompt mais 8.192 tokens de reserva para a resposta, arredondada para múltiplos de 2.048 e limitada ao máximo do modelo) e `num_predict` igual à reserva. Prompt que não cabe gera `PromptTooLargeException` antes de qualquer envio, e modelo ausente gera `ModelNotInstalledException`, sem download. Também recebe a resposta dentro do timeout HTTP com teto de 16 MiB, limita linhas, fragmentos e saída NDJSON, exige marcador de conclusão e descarta a resposta (`PromptTruncatedException`) se o `prompt_eval_count` for implausivelmente baixo para o tamanho do prompt. Usa proxy direto e não segue redirecionamentos.
+- `PromptTokens` estima de forma conservadora os tokens de um prompt por classe de caractere. O Qwen separa cada dígito em um token, então dígitos, dados densos (base64, hex) e pontuação em sequência pesam mais. A calibração contra contagens reais do Ollama fica fixada em teste. Sem `num_ctx`, o Ollama usa 4k tokens abaixo de 24 GiB de VRAM e corta em silêncio o início de prompts maiores, onde ficam as regras de segurança.
 - `HttpExchange` impõe prazo fim a fim, incluindo o consumo do corpo, e espera de forma interrompível: interromper a thread aborta a chamada em andamento.
 - `DocumentationValidator` limita e redige novamente a saída do modelo, valida Unicode e estrutura Markdown e impõe o contrato de H1 e Markdown passivo antes da publicação.
 - `SecurePairWriter` é compartilhado pelos writers de documentação e pré-visualização. Exige um diretório de saída existente, confiável e não compartilhado (rejeita diretórios POSIX graváveis por grupo ou outros), abre todos os ancestrais com handles seguros, prepara a saída por canais privados `CREATE_NEW`, verifica identidade e digest, publica sem substituir um destino que surja concorrentemente e restaura originais em quarentena em ordem reversa se algo falhar.
@@ -65,10 +65,9 @@ DocGenCLI / RepositoryAnalysisService
 ProjectBrief + SupportingDocument[] (texto de PDFs)
   -> ArchitecturePlanningService.prepare()      (sem rede)
       -> ProjectPromptBuilder.buildPlanningPrompt
-  -> Preparation (prompt exato, digest SHA-256)
+  -> Preparation (prompt exato)
   -> ArchitecturePlanningService.plan()
-      -> RemoteGate (allowRemote + RemoteConsent)
-      -> LLMProvider.generateStructured
+      -> LLMProvider.generateStructured (Ollama local)
       -> ArchitecturePlanParser (validação e saneamento)
       -> MermaidDiagram.fromPlan + validate
   -> Result (ArchitecturePlan, mermaid, avisos)
@@ -76,8 +75,7 @@ ProjectBrief + SupportingDocument[] (texto de PDFs)
 ProjectBrief + ArchitecturePlan aprovado
   -> ProjectDocumentationService.prepare()      (sem rede)
   -> ProjectDocumentationService.generate()
-      -> RemoteGate
-      -> LLMProvider.generateDocumentation (README e ARCHITECTURE)
+      -> LLMProvider.generateDocumentation (README e ARCHITECTURE, Ollama local)
       -> DocumentationValidator (UnsafeOutputException se reprovar)
       -> MermaidDiagram
 ```
@@ -98,9 +96,7 @@ ProjectBrief + ArchitecturePlan aprovado
   Os requisitos marcados como `USER` são copiados literalmente do `ProjectBrief`: o modelo nunca consegue rotular texto próprio como informado pelo usuário, e o que ele alega como `USER` vira `AI_SUGGESTION`. Esse é o mecanismo que separa fatos fornecidos por pessoas de recomendações da IA.
 - `ArchitecturePlanJson` é o formato de persistência (leitura estrita, propriedades desconhecidas falham), separado do parser de saída do modelo.
 - `MermaidDiagram` gera Mermaid a partir da estrutura. Os IDs de nó são gerados (`n1`, `n2`…), os rótulos passam por allowlist de caracteres e nunca são emitidos `click`, `style`, `classDef`, diretivas `%%{init}%%`, links ou HTML. `validate()` reconfere cada linha contra uma gramática mínima. O diagrama é um artefato separado e não altera as regras de Markdown passivo.
-- `RemoteGate` concentra a fronteira remota usada pelos dois serviços: um provedor remoto só é usado com `allowRemote` e um `RemoteConsent` positivo para o destino e o tamanho concretos. Provedores locais não chamam o callback.
-- `LLMProviderResolver` e `ProviderSelection` desacoplam a criação de provedores (testes injetam provedores falsos) e restringem nomes de modelo a `[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}`.
-- `PromptDigest` calcula SHA-256 sobre partes com prefixo de tamanho; a API usa esse digest para amarrar o consentimento ao conteúdo exato.
+- `LLMProviderResolver` e `ProviderSelection` desacoplam a criação do provedor a partir do modelo escolhido (testes injetam provedores falsos) e restringem nomes de modelo a `[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}`.
 
 ## docgen-api
 
@@ -113,7 +109,6 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | Erros | `ApiExceptionHandler`, `ApiExceptions` (códigos e mensagens fixas) |
 | Projetos | `ProjectController`, `ProjectService`, `ProjectRepository`, `ProjectDtos` |
 | Anexos/PDF | `AttachmentController`, `AttachmentService`, `AttachmentRepository`, `PdfTextExtractor` |
-| Consentimento | `RemoteConsentService` |
 | Planejamento e documentação | `WorkflowController`, `AiWorkflowService`, `PlanService`, `PlanRepository`, `ArtifactService`, `ArtifactRepository`, `WorkflowDtos` |
 | Jobs | `JobController`, `JobService`, `JobRepository`, `JobFailures` |
 | Repositórios autorizados (Fase 02) | `ApiController`, `AuthorizedRepositoryRegistry`, `RepositoryAnalysisService` |
@@ -124,7 +119,6 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | Método e rota | Autenticação | Descrição | Sucesso |
 |---|---|---|---|
 | `GET /health` | pública | Disponibilidade. | 200 |
-| `GET /providers` | pública | Metadados estáticos: `id`, `remote`, `defaultModel`, `enabled` (gate do operador), `configured` (existe chave no servidor), `requiresConsent`. Nunca expõe chaves. | 200 |
 | `POST /auth/token` | pública | `{username, password}` → `{accessToken, tokenType, expiresAt, username}`. | 200 |
 | `GET /auth/session` | sim | Usuário da sessão. | 200 |
 | `DELETE /auth/token` | sim | Revoga o token atual. | 204 |
@@ -133,11 +127,10 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | `GET` · `PUT` · `DELETE /projects/{id}` | sim | Detalhe, atualização e exclusão (cancela os jobs do projeto). | 200 · 200 · 204 |
 | `POST /projects/{id}/attachments` | sim | Corpo bruto `application/pdf`; nome de exibição em `X-Attachment-Name` (URL-encoded). | 201 |
 | `GET /projects/{id}/attachments` · `DELETE …/{attachmentId}` | sim | Lista (com trecho extraído) e remoção. | 200 · 204 |
-| `POST /projects/{id}/transmission-previews` | sim | `{operation: PLAN\|DOCUMENTATION, provider?, model?, planId?}` → destino, dados incluídos, tamanho exato e `consentToken` (somente provedor remoto). | 200 |
-| `POST /projects/{id}/plans` | sim | `{provider?, model?, consentToken?}` → job assíncrono. | 202 |
+| `POST /projects/{id}/plans` | sim | `{provider?, model?}` (`provider` só aceita `ollama`) → job assíncrono. | 202 |
 | `GET /projects/{id}/plans` · `GET …/{planId}` | sim | Lista e plano completo (`origin: AI_GENERATED`, `requiresHumanReview: true`). | 200 |
 | `POST /projects/{id}/plans/{planId}/approval` | sim | Revisão humana: marca o plano como `APPROVED`. | 200 |
-| `POST /projects/{id}/documentation` | sim | `{planId, provider?, model?, consentToken?}`; exige plano aprovado → job. | 202 |
+| `POST /projects/{id}/documentation` | sim | `{planId, provider?, model?}`; exige plano aprovado → job. | 202 |
 | `GET /jobs/{id}` · `POST /jobs/{id}/cancellation` | sim | Estado do job e cancelamento. | 200 |
 | `GET /projects/{id}/jobs` | sim | Histórico de interações do projeto. | 200 |
 | `GET /artifacts` · `GET /projects/{id}/artifacts` | sim | Documentos do usuário ou do projeto. | 200 |
@@ -145,7 +138,7 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | `GET /projects/{id}/artifacts/{artifactId}/content` | sim | Download com nome fixo. | 200 |
 | `GET /projects/{id}/export?planId=` | sim | ZIP com `README.md`, `ARCHITECTURE.md`, `architecture.mmd` e `architecture-plan.json`. | 200 |
 
-Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `invalid_credentials`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`consent_required`, `consent_invalid`, `consent_stale`, `remote_disabled`, `plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`) e 429 (`too_many_attempts`, `too_many_jobs`, `queue_full`).
+Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `invalid_credentials`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`) e 429 (`too_many_attempts`, `too_many_jobs`, `queue_full`).
 
 ### Jobs assíncronos
 
@@ -162,15 +155,15 @@ stateDiagram-v2
 ```
 
 - Pool fixo de workers (`docgen.jobs.workers`, padrão 2), fila limitada (16; fila cheia gera 429), no máximo 3 jobs ativos por usuário e timeout por job (padrão 15 min) controlado por um watchdog.
-- Na submissão, a API tira um snapshot da entrada exata (o mesmo prompt cujo digest foi consentido) e a thread do worker apenas chama o provedor.
+- Na submissão, a API tira um snapshot da entrada exata (o prompt montado na hora) e a thread do worker apenas chama o Ollama local.
 - Toda transição é compare-and-set no banco (`WHERE status = …`). O resultado (plano ou artefatos) é gravado na mesma transação de `RUNNING → SUCCEEDED`, então um job cancelado, expirado ou cujo projeto foi excluído nunca publica resultado.
-- Cancelamento: `QUEUED` sai da fila antes de começar; `RUNNING` interrompe o worker, o que aborta a chamada HTTP ao provedor (espera interrompível em `HttpExchange`) e a pausa de retentativa do Groq. Interrupções só são entregues enquanto o worker executa código do provedor, nunca durante escrita no H2.
-- Falhas são mapeadas por `JobFailures` para códigos (`provider_timeout`, `provider_unavailable`, `provider_rate_limited`, `invalid_model_output`, `unsafe_model_output`, `consent_required`, `timeout`, `interrupted`…) com mensagens fixas. O log registra só código e classe da exceção.
+- Cancelamento: `QUEUED` sai da fila antes de começar; `RUNNING` interrompe o worker, o que aborta a chamada HTTP ao Ollama (espera interrompível em `HttpExchange`). Interrupções só são entregues enquanto o worker executa código do provedor, nunca durante escrita no H2.
+- Falhas são mapeadas por `JobFailures` para códigos (`provider_timeout`, `provider_unavailable`, `provider_failed`, `model_not_installed`, `prompt_too_large`, `prompt_truncated`, `invalid_model_output`, `unsafe_model_output`, `timeout`, `interrupted`…) com mensagens fixas. O log registra só código e classe da exceção.
 - O cliente acompanha por polling (`GET /jobs/{id}`), com backoff de 0,7 s a 3 s. SSE ou WebSocket não foram necessários.
 
 ### Persistência
 
-H2 embutido em modo arquivo (`$DOCGEN_DATA_DIR`, padrão `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen`, com permissão `0700`), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas (`db/migration/V1__initial_schema.sql`). Tabelas: `projects`, `attachments`, `plans`, `artifacts` e `jobs`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`.
+H2 embutido em modo arquivo (`$DOCGEN_DATA_DIR`, padrão `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen`, com permissão `0700`), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas (`db/migration/V1__initial_schema.sql` e `V2__projetos_somente_ollama.sql`, que move para o Ollama os projetos de provedores removidos e mantém o provedor histórico de planos e jobs). Tabelas: `projects`, `attachments`, `plans`, `artifacts` e `jobs`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`.
 
 | Dado | Guardado? | Política |
 |---|---|---|
@@ -179,8 +172,8 @@ H2 embutido em modo arquivo (`$DOCGEN_DATA_DIR`, padrão `$XDG_DATA_HOME/docgen`
 | Prompts | não | Montados em memória na hora do job. |
 | Plano e documentos | sim | Removidos com o projeto. |
 | Jobs | sim | Registros finalizados há mais de 30 dias são apagados. |
-| Tokens de sessão e consentimento | só em memória | Somente o hash SHA-256 do token de sessão; tudo se perde ao reiniciar. |
-| Credenciais de provedor | não | `GROQ_API_KEY` só existe no ambiente do servidor. |
+| Tokens de sessão | só em memória | Somente o hash SHA-256 do token de sessão; tudo se perde ao reiniciar. |
+| Credenciais de provedor | não existem | O único provedor é o Ollama local, sem chave. |
 
 ### Upload e extração de PDF
 
@@ -207,13 +200,13 @@ Frontend sem framework: HTML5, CSS3 e JavaScript com ES Modules nativos, servido
 | `js/diagram.js` | Layout em camadas (rank por caminho mais longo, quebra de ciclos, ordenação por baricentro) e renderização SVG interativa (zoom, pan, foco por teclado, destaque de conexões, exportação SVG autocontida). |
 | `js/jobs.js` | Polling com backoff e abort. |
 | `js/validation.js` | Validação de formulário espelhando os limites do servidor. |
-| `js/views/*`, `js/components/*` | Dashboard, projetos, novo projeto, workspace (descrição, anexos, IA, histórico e abas de resultados), documentações, configurações, consentimento, anexos, plano, diagrama e documentos. |
+| `js/views/*`, `js/components/*` | Dashboard, projetos, novo projeto, workspace (descrição, anexos, IA, histórico e abas de resultados), documentações, configurações, anexos, plano, diagrama e documentos. |
 
 O diagrama interativo é desenhado a partir da estrutura do plano, não do texto Mermaid. O navegador nunca executa Mermaid, o que elimina essa superfície de execução; o Mermaid validado no servidor é oferecido para cópia e no ZIP.
 
 ## Fronteiras de segurança
 
-- **Remoto vs. local:** Groq é fronteira remota. No core, um provedor remoto exige `allowRemote` e um `RemoteConsent` positivo. Na CLI isso significa `--allow-remote` mais confirmação ou `--yes`. Na API, significa o gate do operador (`DOCGEN_ALLOW_REMOTE=true`) mais um token de consentimento de uso único, amarrado ao usuário, ao projeto, à operação, ao provedor, ao modelo e ao digest do prompt exato. Autenticação nunca é tratada como consentimento. Ollama é local porque recebe as requisições diretamente em `127.0.0.1:11434`, sem proxy.
+- **Somente local:** o único destino de rede do código Java é o Ollama em `127.0.0.1` (host fixo, porta configurável, sem proxy e sem redirecionamentos). Não existe provedor remoto. `LocalOnlyArchitectureTest` reprova o build se o código de produção de qualquer módulo ganhar uma URI HTTP(S) fora do loopback, outro cliente de rede ou outra implementação de `LLMProvider`. No frontend, a CSP `connect-src 'self'` e os testes estáticos impedem chamadas e recursos externos.
 - **Dados não confiáveis:** arquivos do repositório, texto do usuário, texto de PDFs e saída do modelo são não confiáveis em todo o pipeline. O endurecimento de prompts reduz o risco de manipulação; a validação de saída (parser do plano, Mermaid restrito, Markdown passivo) limita o que é persistido e exibido. Nada disso prova correção semântica: planos e documentos exigem revisão humana, e a aprovação do plano é um passo explícito antes da documentação.
 - **Isolamento por usuário:** todo recurso é escopado por `owner`; IDs são UUIDs opacos; recursos de outro usuário respondem 404.
 - **Detalhes:** veja [SECURITY.md](SECURITY.md).

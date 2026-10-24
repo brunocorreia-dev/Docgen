@@ -22,7 +22,10 @@ function stat(label, value, iconName, tone) {
 export async function renderDashboard(ctx) {
   const statsSlot = h('div', { class: 'stats-grid' }, skeleton(2), skeleton(2), skeleton(2), skeleton(2));
   const recentSlot = h('div', { class: 'card-body' }, skeleton(4));
-  const providersSlot = h('div', { class: 'provider-status' }, skeleton(2));
+  const providersSlot = h('div', { class: 'provider-status' },
+    h('div', { class: 'provider-row' },
+      icon('server'),
+      h('div', null, h('strong', null, 'Ollama'), h('small', null, 'Local · os dados ficam neste computador (127.0.0.1)'))));
 
   const view = h('div', { class: 'page dashboard' },
     h('section', { class: 'hero' },
@@ -47,12 +50,12 @@ export async function renderDashboard(ctx) {
           h('li', { class: 'step', style: { '--delay': `${index * 60}ms` } },
             h('span', { class: 'step-icon' }, icon(iconName, { size: 16 })),
             h('div', null, h('strong', null, title), h('p', null, text))))),
-        h('header', { class: 'card-header card-header-inner' }, h('h2', null, 'Provedores de IA')),
+        h('header', { class: 'card-header card-header-inner' }, h('h2', null, 'Modelo de IA')),
         providersSlot)));
 
   ctx.setView(view);
 
-  const [projects, providers] = await Promise.allSettled([ctx.api.listProjects(), ctx.providers()]);
+  const [projects] = await Promise.allSettled([ctx.api.listProjects()]);
   if (projects.status === 'fulfilled') {
     const list = projects.value.projects;
     const totals = list.reduce((sum, item) => ({
@@ -78,15 +81,5 @@ export async function renderDashboard(ctx) {
   } else {
     clear(statsSlot);
     replace(recentSlot, errorState(errorMessage(projects.reason), () => renderDashboard(ctx)));
-  }
-  if (providers.status === 'fulfilled') {
-    replace(providersSlot, ...providers.value.map((provider) => h('div', { class: 'provider-row' },
-      icon(provider.remote ? 'cloud' : 'server'),
-      h('div', null, h('strong', null, provider.id === 'groq' ? 'Groq' : 'Ollama'),
-        h('small', null, provider.remote ? 'Remoto · requer consentimento por operação' : 'Local · os dados ficam na máquina')),
-      h('span', { class: ['badge', provider.enabled && provider.configured ? 'badge-success' : 'badge-warning'] },
-        !provider.enabled ? 'Desativado' : provider.configured ? 'Disponível' : 'Sem chave'))));
-  } else {
-    replace(providersSlot, h('p', { class: 'muted' }, errorMessage(providers.reason)));
   }
 }

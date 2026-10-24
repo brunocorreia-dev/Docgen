@@ -15,10 +15,8 @@ public record DocumentationRequest(
         Path repository,
         Path outputDirectory,
         Operation operation,
-        String provider,
         String model,
         List<String> includeExtensions,
-        boolean allowRemote,
         boolean persist,
         boolean force
 ) {

@@ -132,16 +132,8 @@ class AuthAndSecurityTest extends ApiTestSupport {
     }
 
     @Test
-    void providersNeverExposeCredentials() throws Exception {
-        String body = mvc.perform(get("/api/v1/providers"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.providers[?(@.id == 'groq')].requiresConsent").value(true))
-                .andExpect(jsonPath("$.providers[?(@.id == 'ollama')].defaultModel").value("llama3.2"))
-                .andReturn().getResponse().getContentAsString();
-        String key = System.getenv("GROQ_API_KEY");
-        if (key != null && !key.isBlank()) {
-            org.junit.jupiter.api.Assertions.assertFalse(body.contains(key));
-        }
-        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase(java.util.Locale.ROOT).contains("apikey"));
+    void theRemoteProviderCatalogNoLongerExists() throws Exception {
+        mvc.perform(get("/api/v1/providers")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/providers").with(httpBasic(USER, PASSWORD))).andExpect(status().isNotFound());
     }
 }

@@ -1,5 +1,6 @@
 package com.docgen.api;
 
+import com.docgen.OllamaEndpoint;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,7 +26,7 @@ public record DocGenApiProperties(
         @Valid Api api,
         Map<String, String> repositories,
         @Valid Storage storage,
-        @Valid Remote remote,
+        @Valid Ollama ollama,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
         @Valid Auth auth
@@ -34,10 +35,10 @@ public record DocGenApiProperties(
     public DocGenApiProperties {
         repositories = repositories == null ? Map.of() : Map.copyOf(repositories);
         storage = Objects.requireNonNullElseGet(storage, () -> new Storage(null, false));
-        remote = Objects.requireNonNullElseGet(remote, () -> new Remote(false));
+        ollama = Objects.requireNonNullElseGet(ollama, () -> new Ollama(0));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
-        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
+        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null));
     }
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
@@ -75,8 +76,15 @@ public record DocGenApiProperties(
     public record Storage(String dataDirectory, boolean inMemory) {
     }
 
-    /** Operator-level gate: remote providers are unusable unless this is true. */
-    public record Remote(boolean enabled) {
+    /** Port of the local Ollama service; the host is always 127.0.0.1 and cannot be configured. */
+    public record Ollama(@Min(0) @Max(65_535) int port) {
+        public Ollama {
+            port = port == 0 ? OllamaEndpoint.DEFAULT_PORT : port;
+        }
+
+        public OllamaEndpoint endpoint() {
+            return new OllamaEndpoint(port);
+        }
     }
 
     public record Jobs(
@@ -109,11 +117,10 @@ public record DocGenApiProperties(
         }
     }
 
-    public record Auth(Duration tokenTtl, Duration idleTimeout, Duration consentTtl) {
+    public record Auth(Duration tokenTtl, Duration idleTimeout) {
         public Auth {
             tokenTtl = tokenTtl == null ? Duration.ofHours(8) : tokenTtl;
             idleTimeout = idleTimeout == null ? Duration.ofMinutes(30) : idleTimeout;
-            consentTtl = consentTtl == null ? Duration.ofMinutes(10) : consentTtl;
         }
     }
 }

@@ -40,9 +40,9 @@ docgen:
   storage:
     data-directory: ${DOCGEN_DATA_DIR:}
     in-memory: false
-  remote:
-    # Operator gate for remote providers (Groq). Users must still consent per operation.
-    enabled: ${DOCGEN_ALLOW_REMOTE:false}
+  ollama:
+    # Only the port is configurable; DocGen always talks to Ollama on 127.0.0.1.
+    port: ${DOCGEN_OLLAMA_PORT:11434}
   jobs:
     workers: ${DOCGEN_JOB_WORKERS:2}
     queue-capacity: 16
@@ -57,4 +57,3 @@ docgen:
   auth:
     token-ttl: 8h
     idle-timeout: 30m
-    consent-ttl: 10m

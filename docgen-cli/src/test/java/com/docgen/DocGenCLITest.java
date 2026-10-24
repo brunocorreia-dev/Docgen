@@ -11,6 +11,9 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,39 +79,95 @@ class DocGenCLITest {
     }
 
     @Test
-    void remoteProviderStillRequiresAllowRemote() throws Exception {
+    void generatesReadmeAndArchitectureWithTheLocalProvider() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
+        List<String> models = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        DocumentationService service = new DocumentationService(model -> {
+            models.add(model);
+            return prompt -> calls.getAndIncrement() == 0 ? "# App\n\nReadme." : "# Architecture\n\nLayers.";
+        });
 
-        int exitCode = new CommandLine(new DocGenCLI())
-                .execute("-o", out.toString(), repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI(service))
+                .execute("--model", "qwen2.5-coder:7b", "-o", out.toString(), repo.toString());
 
-        assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
-        assertFalse(Files.exists(repo.resolve("ARCHITECTURE.md")), "nothing must be generated without consent");
+        assertEquals(0, exitCode, () -> "stderr: " + stderr.toString(StandardCharsets.UTF_8));
+        assertEquals("# App\n\nReadme.\n", Files.readString(out.resolve("README.md")));
+        assertEquals("# Architecture\n\nLayers.\n", Files.readString(out.resolve("ARCHITECTURE.md")));
+        assertEquals(List.of("qwen2.5-coder:7b"), models);
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("Documentation written to:"));
     }
 
     @Test
-    void yesNeverReplacesTheAllowRemoteBoundary() throws Exception {
+    void aMissingModelFailsWithInstallInstructionsAndNoDownload() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
+        DocumentationService service = new DocumentationService(model -> failingCheck(
+                new ModelNotInstalledException(LLMProviderFactory.DEFAULT_MODEL)));
 
-        int exitCode = new CommandLine(new DocGenCLI())
-                .execute("--yes", "-o", out.toString(), repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
 
         assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
-        assertFalse(Files.exists(repo.resolve("README.md")));
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("qwen2.5-coder:7b is not installed"), error);
+        assertTrue(error.contains("never downloads"), error);
+        assertTrue(error.contains("ollama pull qwen2.5-coder:7b"), error);
+        assertFalse(stdout.toString(StandardCharsets.UTF_8).contains("Generating"), "nothing is announced");
+        assertFalse(Files.exists(out.resolve("README.md")));
     }
 
     @Test
-    void nonInteractiveRemoteRunRequiresExplicitYes() throws Exception {
+    void aPromptTooLargeForTheModelExplainsHowToNarrowTheInput() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        DocumentationService service = new DocumentationService(model -> failingCheck(
+                new PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768)));
+
+        int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("accepts at most 32768"), error);
+        assertTrue(error.contains("--include-ext"), error);
+        assertFalse(stdout.toString(StandardCharsets.UTF_8).contains("Generating"),
+                "the size is checked before \"Generating...\" is printed");
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
+    void rejectsEveryProviderOtherThanTheLocalOllama() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 
         int exitCode = new CommandLine(new DocGenCLI())
-                .execute("--allow-remote", "-o", out.toString(), repo.toString());
+                .execute("--provider", "remote-cloud", "-o", out.toString(), repo.toString());
 
         assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--yes"));
-        assertFalse(Files.exists(repo.resolve("README.md")), "no provider may be contacted without explicit non-interactive consent");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("runs only on the local Ollama service"));
+        assertFalse(Files.exists(out.resolve("README.md")));
+        assertFalse(Files.exists(out.resolve("ARCHITECTURE.md")));
+    }
+
+    @Test
+    void rejectsAnOllamaPortOutsideTheTcpRange() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("--ollama-port", "70000", "-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("between 1 and 65535"));
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
+    void remoteTransmissionOptionsNoLongerExist() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+
+        for (String option : List.of("--allow-remote", "--yes", "-y")) {
+            stderr.reset();
+            int exitCode = new CommandLine(new DocGenCLI()).execute(option, "--dry-run", repo.toString());
+
+            assertEquals(2, exitCode, option);
+            assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("Unknown option"), option);
+        }
     }
 
     @Test
@@ -129,7 +188,7 @@ class DocGenCLITest {
     void refusesToRunWhenSelectionIsEmpty() throws Exception {
         Files.writeString(repo.resolve("binary.bin"), "data");
 
-        int exitCode = new CommandLine(new DocGenCLI()).execute("--allow-remote", repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI()).execute(repo.toString());
 
         assertEquals(1, exitCode);
         assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("no files matched"));
@@ -170,6 +229,21 @@ class DocGenCLITest {
         assertFalse(error.contains("provider-that-does-not-exist"), error);
         assertEquals("keep-me", Files.readString(out.resolve("README.md")));
         assertFalse(Files.exists(out.resolve("ARCHITECTURE.md")));
+    }
+
+    /** A provider whose fit check fails the way OllamaProvider does, before any generation. */
+    private static LLMProvider failingCheck(Exception failure) {
+        return new LLMProvider() {
+            @Override
+            public String generateDocumentation(String prompt) {
+                throw new AssertionError("generation must not start");
+            }
+
+            @Override
+            public void requireFits(String... prompts) throws Exception {
+                throw failure;
+            }
+        };
     }
 
     @Test

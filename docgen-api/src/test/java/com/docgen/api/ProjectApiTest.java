@@ -30,10 +30,14 @@ class ProjectApiTest extends ApiTestSupport {
 
         mvc.perform(authed(put("/api/v1/projects/" + id), token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(projectJson("Renamed", "groq")))
+                        .content(projectJson("Renamed", "remote-cloud")))
+                .andExpect(status().isBadRequest());
+        mvc.perform(authed(put("/api/v1/projects/" + id), token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(projectJson("Renamed", "ollama")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("Renamed"))
-                .andExpect(jsonPath("$.provider").value("groq"));
+                .andExpect(jsonPath("$.provider").value("ollama"));
 
         mvc.perform(authed(delete("/api/v1/projects/" + id), token)).andExpect(status().isNoContent());
         mvc.perform(authed(get("/api/v1/projects/" + id), token)).andExpect(status().isNotFound());

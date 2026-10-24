@@ -79,7 +79,7 @@ class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/", "/index.html", "/favicon.svg",
                                 "/css/**", "/js/**", "/img/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/providers").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/token").permitAll()
                         .requestMatchers("/api/v1/**").hasRole("ANALYST")
                         .anyRequest().denyAll())

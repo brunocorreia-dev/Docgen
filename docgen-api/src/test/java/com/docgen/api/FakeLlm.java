@@ -12,8 +12,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Scriptable stand-in for Groq and Ollama. Tests never reach a real provider:
- * the resolver bean is replaced by {@link #resolver()} in {@link ApiTestSupport}.
+ * Scriptable stand-in for the local Ollama provider. Tests never reach a real
+ * model: the resolver bean is replaced by {@link #resolver()} in {@link ApiTestSupport}.
  */
 final class FakeLlm {
     @FunctionalInterface
@@ -23,6 +23,7 @@ final class FakeLlm {
 
     private static final Deque<Script> SCRIPTS = new ArrayDeque<>();
     private static final List<String> PROMPTS = Collections.synchronizedList(new ArrayList<>());
+    private static final List<String> MODELS = Collections.synchronizedList(new ArrayList<>());
     private static volatile Script fallback = prompt -> {
         throw new IllegalStateException("No scripted response");
     };
@@ -33,6 +34,7 @@ final class FakeLlm {
     static synchronized void reset() {
         SCRIPTS.clear();
         PROMPTS.clear();
+        MODELS.clear();
         fallback = prompt -> {
             throw new IllegalStateException("No scripted response");
         };
@@ -48,6 +50,13 @@ final class FakeLlm {
 
     static List<String> prompts() {
         return List.copyOf(PROMPTS);
+    }
+
+    /** Models requested from the resolver, in order; {@code null} means the default model. */
+    static List<String> models() {
+        synchronized (MODELS) {
+            return new ArrayList<>(MODELS);
+        }
     }
 
     /** A script that blocks interruptibly until released, like a slow provider call. */
@@ -71,11 +80,8 @@ final class FakeLlm {
     }
 
     static LLMProviderResolver resolver() {
-        return (provider, model, allowRemote) -> {
-            boolean remote = "groq".equals(provider);
-            if (remote && !allowRemote) {
-                throw new IllegalArgumentException("remote not allowed");
-            }
+        return model -> {
+            MODELS.add(model);
             return new LLMProvider() {
                 @Override
                 public String generateDocumentation(String prompt) throws Exception {
@@ -85,16 +91,6 @@ final class FakeLlm {
                 @Override
                 public String generateStructured(String prompt) throws Exception {
                     return next(prompt);
-                }
-
-                @Override
-                public boolean isRemote() {
-                    return remote;
-                }
-
-                @Override
-                public String describeDestination() {
-                    return remote ? "Fake Groq (remote test double)" : "Fake Ollama (local test double)";
                 }
             };
         };
