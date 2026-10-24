@@ -7,7 +7,7 @@
 | Fase | 0: auditoria e plano (sem código de produção) |
 | Data | 2026-10-24 |
 | Branch | `feat/desktop-fase0-auditoria`, criada a partir de `main` (`9d65fc1`) |
-| Estado deste documento | Proposta, aguardando aprovação |
+| Estado deste documento | **Aprovado** em 2026-10-24, com as decisões registradas na §9 |
 | Decisões relacionadas | [ADR 0001](../adr/0001-shell-desktop.md), [ADR 0002](../adr/0002-autenticacao-por-token-de-lancamento.md), [ADR 0003](../adr/0003-somente-local.md) |
 
 Legenda de estado usada em todo o documento: **Implementado** (existe em `main` e tem teste), **Em
@@ -75,17 +75,17 @@ Avisos do build (já existiam): o `maven-shade-plugin` relata recursos sobrepost
 | # | Achado | Evidência | Consequência |
 |---|---|---|---|
 | A1 | **O Ollama trunca prompts longos em silêncio.** O `OllamaProvider` não envia `options.num_ctx`. Pela documentação oficial, abaixo de 24 GiB de VRAM o contexto padrão é 4k tokens. | Medido aqui: um prompt de 109.951 caracteres (cerca de 30 mil tokens, estimativa) com uma regra na primeira linha voltou com `prompt_eval_count: 2050`, e o modelo **não seguiu a regra** do início. | As regras de segurança ficam no início dos prompts (`PromptBuilder`, `ProjectPromptBuilder`) e são justamente o que se perde. Os prompts de repositório (até 120 mil caracteres) e de planejamento (até 64 mil) excedem 4k tokens. É defeito de segurança e de qualidade **já presente em `main`**. |
-| A2 | **Já existe um launcher desktop numa branch publicada**, com desenho diferente das decisões 4.1/4.2: janela Swing num processo separado, backend como processo filho, protocolo HMAC por stdin/stdout e pareamento do navegador com código confirmado na janela. | `feat/docgen-desktop-launcher`: 13 commits à frente de `main`, também em `origin`; 97 arquivos, +5.445 linhas de produção (4.445 em `docgen-launcher` e `docgen-desktop-protocol`, 1.000 em API e web) e +3.533 de testes. | Caminhos de reaproveitamento e de descarte estão na seção 4.6. É preciso decidir antes da Fase 2 (pergunta P1). |
+| A2 | **Já existe um launcher desktop numa branch publicada**, com desenho diferente das decisões 4.1/4.2: janela Swing num processo separado, backend como processo filho, protocolo HMAC por stdin/stdout e pareamento do navegador com código confirmado na janela. | `feat/docgen-desktop-launcher`: 13 commits à frente de `main`, também em `origin`; 97 arquivos, +5.445 linhas de produção (4.445 em `docgen-launcher` e `docgen-desktop-protocol`, 1.000 em API e web) e +3.533 de testes. | Decidido (P1): seguir 4.1/4.2 a partir de `main` e aproveitar só a trava de instância, os diretórios privados, a abertura do navegador e os scripts `jlink` (seção 4.6). A branch não é alterada. |
 | A3 | O `OllamaProvider` depende de `GroqProvider.boundedUtf8BodySubscriber`. | `OllamaProvider.java:101` | Antes de apagar o Groq, o leitor limitado de corpo precisa ir para uma classe própria. |
 | A4 | O banco pode ter linhas com `provider = 'groq'` (projetos, planos, jobs). | `V1__initial_schema.sql`, `ProjectDtos.PROVIDER = "groq\|ollama"` | Projetos antigos quebrariam o `ProviderSelection` depois da remoção. É preciso uma migração nova (seção 7). |
 | A5 | O app não sobe sem `DOCGEN_API_USERNAME`/`DOCGEN_API_PASSWORD` (`@NotBlank`). Toda linha do banco tem `owner` = usuário do login. | `DocGenApiProperties.Api`, `SecurityConfig.userDetailsService` | Sem login, o dono passa a ser fixo (proposta: `local`), com migração dos donos existentes. O escopo por `owner` continua como camada de defesa. |
 | A6 | O diretório de dados é XDG em **todos** os SOs (no Windows, cai em `~\.local\share\docgen`). | `StorageConfig.resolveDataDirectory` | Precisa virar caminho por SO (Fase 2). No Linux, o caminho atual se mantém e os dados existentes continuam válidos. |
-| A7 | A Vercel publica o **frontend do app** (`docgen-web/src/main/resources/static`), que não funciona sem o backend. | `vercel.json` | Pode confundir quem chega ao site. A correção definitiva fica na Fase 8; a pergunta P8 propõe neutralizar antes. |
-| A8 | Na CLI, o provedor padrão é `groq` e o modelo padrão do Ollama é `llama3.2` (não é Qwen). | `DocGenCLI`, `LLMProviderFactory` | Na Fase 1 o padrão vira Ollama e o modelo padrão vira uma tag Qwen verificada (pergunta P6). |
+| A7 | A Vercel publica o **frontend do app** (`docgen-web/src/main/resources/static`), que não funciona sem o backend. | `vercel.json` | Pode confundir quem chega ao site. Decidido (P8): na Fase 1 o `vercel.json` passa a servir `site/` com uma página estática mínima; o site completo fica na Fase 8. |
+| A8 | Na CLI, o provedor padrão é `groq` e o modelo padrão do Ollama é `llama3.2` (não é Qwen). | `DocGenCLI`, `LLMProviderFactory` | Decidido (P6): na Fase 1 o padrão vira Ollama com `qwen2.5-coder:7b`. Sem o modelo instalado, a CLI falha com mensagem amigável e não baixa nada sozinha. |
 | A9 | O `SecretRedactor` tem um padrão para chaves `gsk_…` (formato do Groq). | `SecretRedactor.java:21` | Isso é **defesa** (redige segredos nos dados do usuário), não integração. Proposta: manter o padrão, com comentário neutro. Remover enfraqueceria a redação (princípio 5). |
 | A10 | O Ollama tem **modelos de nuvem**: a instância local pode falar com ollama.com. A FAQ oficial permite desligar com `OLLAMA_NO_CLOUD=1` ou `disable_ollama_cloud` em `~/.ollama/server.json`. A documentação não diz como um cliente local identifica um modelo de nuvem. | docs.ollama.com/cloud, docs.ollama.com/faq | Um modelo de nuvem escolhido no DocGen tiraria a inferência do computador **pelo próprio Ollama**. O DocGen precisa bloquear isso (ADR 0003, Fase 3). |
 | A11 | O Ollama 0.32.11 local devolve, em `/api/tags`, campos que a `api.md` não documenta (`details.context_length`, `capabilities`). A própria `api.md` avisa que a documentação está migrando para docs.ollama.com. | `curl /api/tags` local; `docs/api.md` | O cliente da Fase 3 deve tratar campos opcionais e ser testado contra a versão real, não só contra a documentação. |
-| A12 | Gerar README/ARCHITECTURE **a partir de um repositório** só existe na CLI. A API só *analisa* repositórios mapeados pelo operador em `docgen.repositories`, que é configuração de arquivo ou ambiente. | `RepositoryAnalysisService`, `ApiController` | No app (sem terminal), o "gere um README deste projeto" da Fase 6 precisa de um jeito de autorizar uma pasta pela UI (pergunta P7). |
+| A12 | Gerar README/ARCHITECTURE **a partir de um repositório** só existe na CLI. A API só *analisa* repositórios mapeados pelo operador em `docgen.repositories`, que é configuração de arquivo ou ambiente. | `RepositoryAnalysisService`, `ApiController` | Decidido (P7), na Fase 6: a pasta é autorizada pela UI e revogável. O navegador não fornece o caminho real, então vale o diálogo nativo aberto pelo processo Java ou um caminho digitado e validado pelas mesmas regras do `RepoScanner`. |
 | A13 | O backend só loga no console. Num app aberto pelo menu, esses logs se perdem. | `application.yml` (sem arquivo de log) | A Fase 2 precisa de log local em arquivo, rotacionado e sem conteúdo de conversa. |
 | A14 | Fontes: o CSS cita "Inter" e "JetBrains Mono" só por nome (cai na fonte do sistema). Nada externo é carregado. | `app.css` | Fontes empacotadas com licença OFL na Fase 4. |
 | A15 | Mensagens de erro do servidor são fixas e em inglês. A UI traduz por `code` (`messages.js`). | `ApiExceptions`, `messages.js` | Manter o padrão: códigos estáveis no servidor e texto em PT-BR na UI. |
@@ -136,10 +136,10 @@ mudar de pacote ou receber ajustes triviais).
 | Classe ou recurso | Ação | Fase | Motivo |
 |---|---|---|---|
 | `HostHeaderFilter` | Adaptar | 2 | Exigir host **e porta** (`127.0.0.1:<porta>` ou `localhost:<porta>`). `::1` sai, porque o servidor nem escuta em IPv6. |
-| `RequestPolicyFilter` | Adaptar | 2, 5 | F2: validar `Origin` e `Sec-Fetch-Site` em métodos que alteram estado, porque o cookie passa a ser credencial ambiente. F5: tipos `text/markdown` e `text/plain` para anexos do chat. Os limites de tamanho continuam. |
-| `SecurityConfig` | Adaptar | 2 | Sai Basic, `UserDetailsService`, `PasswordEncoder` e `AuthenticationManager`. Entra o filtro de cookie de sessão. `/launch` fica público. A CSP continua igual. |
+| `RequestPolicyFilter` | Adaptar | 2, 5 | F2: validar `Origin` e `Sec-Fetch-Site` em métodos que alteram estado, como defesa em profundidade (não há credencial ambiente). F5: tipos `text/markdown` e `text/plain` para anexos do chat. Os limites de tamanho continuam. |
+| `SecurityConfig` | Adaptar | 2 | Sai Basic, `UserDetailsService`, `PasswordEncoder` e `AuthenticationManager`. O Bearer passa a valer só para tokens de sessão nascidos da troca do token de lançamento. `/launch` fica público. A CSP continua igual. |
 | `AuthTokenService` | Adaptar | 2 | Vira o repositório de sessões (só o hash, em memória) e de tokens de lançamento de uso único. |
-| `BearerTokenAuthenticationFilter` | Substituir | 2 | Por um filtro de cookie `HttpOnly` (ADR 0002). |
+| `BearerTokenAuthenticationFilter` | Manter | 2 | Continua lendo só `Authorization: Bearer`. Nenhum cookie é criado nem lido (ADR 0002). |
 | `AuthController` | **Remover** | 2 | Login por usuário e senha. Substituído pela troca do token de lançamento. |
 | `LoginThrottle`, `ThrottledAuthenticationManager` | **Remover** | 2 | Sem senha, não há força bruta de login. O token de lançamento tem 256 bits e é de uso único. |
 | `CurrentUser` | Adaptar | 2 | Dono fixo da instalação (proposta: `local`). |
@@ -172,9 +172,9 @@ Testes da API:
 
 | Teste | Ação | Fase | Motivo |
 |---|---|---|---|
-| `AuthAndSecurityTest` | Adaptar | 2 | Saem os testes de login, Basic e bloqueio progressivo. Ficam e se adaptam CSP, Host, CORS, Content-Type, rotas negadas e provedores sem credencial. Entram os testes da seção 4.2 do pedido (sem cookie = 401, Host inválido, `Origin` cruzado, token reutilizado). |
+| `AuthAndSecurityTest` | Adaptar | 2 | Saem os testes de login, Basic e bloqueio progressivo. Ficam e se adaptam CSP, Host, CORS, Content-Type, rotas negadas e provedores sem credencial. Entram os testes do ADR 0002 (sem token = 401, nenhuma resposta com `Set-Cookie`, Host inválido, `Origin` cruzado, token reutilizado). |
 | `WorkflowApiTest` | Adaptar | 1 | Saem `remoteProvidersNeedOperationSpecificSingleUseConsent`, `consentBecomesStaleWhenTheProjectChanges` e `localProvidersDoNotIssueConsentTokens`. Os demais seguem com Ollama falso. |
-| `ApiTestSupport`, `FakeLlm` | Adaptar | 1, 2 | F1: o falso deixa de ser "remoto". F2: os testes autenticam por sessão (token de lançamento → cookie) em vez de Basic. |
+| `ApiTestSupport`, `FakeLlm` | Adaptar | 1, 2 | F1: o falso deixa de ser "remoto". F2: os testes autenticam por sessão (token de lançamento → Bearer) em vez de Basic. |
 | `DocGenApiApplicationTest`, `ProjectApiTest`, `AttachmentApiTest`, `JobTimeoutTest` | Adaptar | 2 | Mesmo motivo: autenticação de teste. Os testes de isolamento entre donos continuam, porque o `owner` segue no esquema. |
 | `AuthorizedRepositoryRegistryTest` | Manter | — | — |
 | Novo `LocalOnlyArchitectureTest` | Planejado | 1 | Varre o código de produção de todos os módulos e falha com URI HTTP(S) fora do loopback, ou com classe de provedor que não seja o Ollama (ADR 0003). |
@@ -185,21 +185,20 @@ Testes da API:
 |---|---|---|---|
 | `views/login.js` | **Remover** | 2 | Sem login. |
 | `components/consent.js` | **Remover** | 1 | Consentimento remoto. |
-| `js/api.js` | Adaptar | 2, 4 | F2: sai o token em `sessionStorage`; requisições same-origin com cookie. F4: streaming (`fetch` + `ReadableStream`). |
+| `js/api.js` | Adaptar | 2, 4 | F2: o Bearer continua só no `sessionStorage`, mas vem da troca do token de lançamento (sem login e sem cookie). F4: streaming (`fetch` + `ReadableStream`, com o cabeçalho `Authorization`). |
 | `js/main.js` | Adaptar | 2, 4 | F2: sem tela de login. F4: nova shell (sidebar com histórico, chat como tela inicial). |
 | `js/router.js` | Adaptar | 2, 4, 6 | Sai `login`. Entram chat, onboarding e modelos. Projetos vão para Engenharia. |
 | `js/markdown.js` | Adaptar | 4 | Botão copiar, realce leve sem dependência e renderização incremental durante o streaming. Continua sem interpretar HTML. |
-| `js/url.js` | Adaptar | 4 | Não transformar em link clicável URLs de loopback ou rede privada vindas do modelo (mitiga R3). |
 | `js/messages.js`, `js/validation.js` | Adaptar | 1 | Saem as mensagens de Groq e consentimento e a lista de provedores. |
 | `components/activity.js`, `components/plan-view.js` | Adaptar | 1 | Rótulos de provedor. |
 | `views/settings.js` | Adaptar | 2, 4 | Sai "Conta" e a chave do Groq. Entram tema, privacidade e "Apagar todos os meus dados". |
 | `views/dashboard.js`, `projects.js`, `project-new.js`, `project-form.js`, `workspace.js`, `documents.js` | Adaptar | 1, 6 | F1: sem seleção de Groq nem diálogo de consentimento. F6: passam para a seção Engenharia. |
 | `components/attachments.js` | Adaptar | 5 | Reaproveitado no composer do chat. |
-| `components/diagram-view.js`, `docs-view.js`, `diagram.js`, `dom.js`, `format.js`, `icons.js`, `jobs.js`, `ui.js` | Manter | — | — |
+| `components/diagram-view.js`, `docs-view.js`, `diagram.js`, `dom.js`, `format.js`, `icons.js`, `jobs.js`, `ui.js`, `url.js` | Manter | — | — |
 | `css/app.css` | Adaptar | 4 | Design system em tokens, tema claro opcional e `@font-face` local. |
 | `index.html` | Adaptar | 4 | Nova shell e fontes locais. |
 | `favicon.svg` | Manter | — | — |
-| Testes `api.test.mjs`, `markdown.test.mjs`, `security.test.mjs` | Adaptar | 2, 4 | Cookie no lugar do Bearer; casos de injeção na resposta do modelo; varredura também de URLs externas. |
+| Testes `api.test.mjs`, `markdown.test.mjs`, `security.test.mjs` | Adaptar | 1, 2, 4 | F1: varredura também de URLs externas. F2: token vindo da troca de lançamento. F4: casos de injeção na resposta do modelo. |
 | Demais testes JS | Manter | — | — |
 | Novos: página de lançamento, chat, parser de stream, onboarding, modelos, fontes | Planejado | 2–4 | — |
 
@@ -220,7 +219,7 @@ Testes da API:
 
 ### 4.6 Branch `feat/docgen-desktop-launcher` (Em desenvolvimento, fora de `main`)
 
-Ação proposta se a resposta à pergunta P1 for "seguir as decisões 4.1/4.2 a partir de `main`":
+Decisão P1: seguir as decisões 4.1/4.2 a partir de `main` e aproveitar só a trava de instância, os diretórios privados, a abertura do navegador e os scripts `jlink`:
 
 | Itens | Ação | Motivo |
 |---|---|---|
@@ -229,15 +228,12 @@ Ação proposta se a resposta à pergunta P1 for "seguir as decisões 4.1/4.2 a 
 | `LauncherWindow`, `LauncherPanel`, `LauncherTheme`, `LauncherUi`, `LauncherViewState`, `ThemedComponents`, `SwingLauncherUi`, `LauncherController` | Descartar | Não há janela Swing. Ideias de estados e mensagens podem inspirar o splash e os erros de inicialização. |
 | API: `DesktopConfig`, `DesktopEnvironmentPostProcessor`, `DesktopHandshakeController`, `DesktopLauncherLink`, `DesktopPairingController`, `DesktopPairingService`; web: `desktop.js`, `desktop-pairing.js` | Descartar | Substituídos pelo token de lançamento (ADR 0002). |
 | `SingleInstanceLock`, `SecureDirectories`, `PlatformDetector`, `BrowserOpener` | **Reaproveitar** (F2) | Trava por arquivo do SO, diretórios privados sem symlink, detecção de SO e arquitetura, abertura do navegador sem shell. |
-| `InstallationLayout` (diretórios por SO) | **Reaproveitar** (F2) | Já resolve XDG, macOS e Windows com caminhos absolutos e normalizados (ver P3 sobre `%LOCALAPPDATA%`). |
-| `LogRedactor`, `BackendLogManager` | Reaproveitar ideias (F2) | Rotação e redação de log local. |
-| `LauncherDiagnostics`, `RuntimeEnvironment` | Reaproveitar ideias (F3) | Diagnóstico de ambiente. |
-| `BrandIcon` | Reaproveitar (F7) | Ícone gerado por código, sem binário versionado. |
+| `InstallationLayout` (diretórios por SO) | **Reaproveitar** (F2) | Já resolve XDG, macOS e Windows com caminhos absolutos e normalizados (no Windows, `%LOCALAPPDATA%\DocGen`, decisão P3). |
 | `packaging/linux/*`, `packaging/README.md` | Reaproveitar (F7) | `jlink` + `jpackage` já verificados no Linux; precisam virar um jar só. |
-| `docs/desktop/INSTALLATION.md`, `TROUBLESHOOTING.md`, `DEVELOPMENT.md` | Reaproveitar trechos (F7, F9) | — |
-| Testes de `SingleInstanceLock`, `InstallationLayout`, `PlatformDetector`, `LogRedactor` | Reaproveitar | Seguem as classes reaproveitadas. |
+| Testes de `SingleInstanceLock`, `InstallationLayout`, `PlatformDetector` | Reaproveitar | Seguem as classes reaproveitadas. |
+| `LogRedactor`, `BackendLogManager`, `LauncherDiagnostics`, `RuntimeEnvironment`, `BrandIcon`, `docs/desktop/*` | Não reaproveitar | Fora da lista aprovada em P1. O log local, o diagnóstico e o ícone são escritos nas próprias fases. |
 
-A branch não é apagada nem reescrita: fica como referência até você decidir.
+A branch não é alterada, apagada nem reescrita (P1).
 
 ## 5. Endpoints: hoje × planejado
 
@@ -250,7 +246,7 @@ mudar na fase.
 |---|---|
 | `GET /health` | Manter |
 | `GET /providers` | Remover (F1) |
-| `POST /auth/token`, `GET /auth/session`, `DELETE /auth/token` | Remover (F2); substituídos pela sessão por cookie |
+| `POST /auth/token`, `GET /auth/session`, `DELETE /auth/token` | Remover (F2); substituídos pela troca do token de lançamento |
 | `POST /repositories/{id}/analysis` | Manter (Engenharia, F6) |
 | `POST/GET /projects`, `GET/PUT/DELETE /projects/{id}` | Manter (Engenharia) |
 | `POST/GET /projects/{id}/attachments`, `DELETE …/{attachmentId}` | Manter |
@@ -265,8 +261,8 @@ mudar na fase.
 | Fase | Rota | Função |
 |---|---|---|
 | 2 | `GET /launch` (estático, fora de `/api`) | Página que lê o token do fragmento e o troca pela sessão. |
-| 2 | `POST /session` · `GET /session` · `DELETE /session` | Troca do token de lançamento por cookie `HttpOnly`; estado da sessão; encerrar a sessão. |
-| 2 | `POST /desktop/shutdown` | "Sair do DocGen" pela UI. |
+| 2 | `POST /session` · `GET /session` · `DELETE /session` | Troca do token de lançamento por token de sessão Bearer (sem cookie); estado da sessão; encerrar a sessão. |
+| 2 | `POST /desktop/shutdown` · `POST /desktop/heartbeat` | "Sair do DocGen" pela UI; sinal de presença da UI (ADR 0001). |
 | 2 | `POST /desktop/reopen` | Só para a segunda execução, autenticada pelo segredo de instância (ADR 0001). |
 | 2 | `DELETE /data` | "Apagar todos os meus dados", com confirmação. |
 | 3 | `GET /ollama/status` | Alcançável ou não, versão e porta. |
@@ -281,10 +277,10 @@ mudar na fase.
 | 5 | `POST/GET /conversations/{id}/attachments` · `DELETE …/{attachmentId}` | PDF, `.md` e `.txt` vinculados à conversa. |
 | 6 | A definir com P7 | Autorizar uma pasta de projeto pela UI. |
 
-Formato do streaming do chat: a escolha entre SSE (`SseEmitter`) e NDJSON (`StreamingResponseBody`) fica
-para a Fase 4, justificada no relatório dela. Inclinação inicial: NDJSON por `fetch` + `ReadableStream`,
-porque o envio é `POST` com corpo (o `EventSource` só faz `GET`), passa pelas mesmas regras de `Origin` e
-Content-Type, usa o mesmo formato do Ollama e o parser é testável em `node --test`.
+Streaming do chat: o transporte está decidido, `fetch` + `ReadableStream`, porque precisa do cabeçalho
+`Authorization` (o `EventSource` não permite cabeçalhos) e de `POST` com corpo. O formato do corpo, NDJSON
+(`StreamingResponseBody`) ou eventos SSE lidos pelo `fetch` (`SseEmitter`), fica para a Fase 4, justificado no
+relatório dela. A inclinação é NDJSON: é o formato do Ollama e o parser é testável em `node --test`.
 
 ## 6. Diretrizes já verificadas para as próximas fases
 
@@ -316,13 +312,15 @@ texto e imagem, 256K), `qwen3` (0.6b a 235b), `qwen3-coder` (30b, 480b), `qwen2.
 | `qwen2.5-coder:1.5b` / `:3b` / `:7b` / `:14b` | 986 MB / 1,9 / 4,7 / 9,0 GB | 32K | Mesma inferência de `q4_K_M`. |
 | `qwen3-coder:30b` | 19 GB | 256K | `latest` = `30b` (MoE `a3b`). |
 
-O catálogo da Fase 3 só leva tags conferidas na fase, com a data da verificação e `"verified": true`. O que
-não puder ser conferido entra com `"verified": false`, e eu aviso.
+O catálogo da Fase 3 inclui as famílias novas (`qwen3.5` etc.) **só com tags verificadas** na fase, com a data
+da verificação e `"verified": true`. O que não puder ser conferido entra com `"verified": false`, e eu aviso.
 
 ### 6.3 Catálogo e recomendação (Planejado, Fase 3)
 
 - Fonte única: `docgen-api/src/main/resources/models/qwen-catalog.json`, com versão do esquema e data de
   verificação.
+- Quando a página da biblioteca informa o tamanho como faixa (por exemplo "6,6 GB – 7,6 GB"), a estimativa
+  de memória usa o **limite superior**.
 - Estimativa de memória ≈ pesos quantizados (tamanho em disco) + KV cache (2 × camadas × cabeças KV ×
   dimensão da cabeça × bytes por elemento × `num_ctx`) + sobrecarga do runtime. Os parâmetros de arquitetura
   vêm do catálogo, conferidos com o `model_info` do `/api/show`. A fórmula e as premissas ficam documentadas
@@ -331,7 +329,16 @@ não puder ser conferido entra com `"verified": false`, e eu aviso.
 - Lógica pura e determinística, testada com os perfis do pedido (CPU e 8 GB, GPU de 6 GB, GPU de 12 GB, Apple
   Silicon com 16 GB, máquina com 4 GB).
 
-### 6.4 `jpackage` do JDK 21 (verificado em 2026-10-24)
+### 6.4 Modelos com modo de raciocínio (requisito registrado na decisão P6)
+
+Modelos Qwen3 em diante podem emitir raciocínio (*thinking*), seja no campo `thinking` do Ollama, seja dentro
+do texto. Antes de qualquer saída de um modelo desses chegar ao `DocumentationValidator`, ao parser do plano
+ou à tela, o raciocínio precisa ser tratado de forma explícita: separado, descartado ou exibido à parte, nunca
+publicado misturado à documentação. Isso vale para a CLI com `--model`, para a Engenharia e para o chat, e
+precisa estar resolvido na primeira fase que oferecer esses modelos (o catálogo da Fase 3). O padrão da CLI,
+`qwen2.5-coder:7b`, não tem modo de raciocínio.
+
+### 6.5 `jpackage` do JDK 21 (verificado em 2026-10-24)
 
 Tipos: `app-image`, `exe`, `msi`, `rpm`, `deb`, `pkg`, `dmg`. Cada formato é gerado no próprio SO, sem
 compilação cruzada. Pré-requisitos: `rpm-build` (RPM), `fakeroot` (Ubuntu/deb), WiX 3.0 ou superior
@@ -345,14 +352,14 @@ relatório de fase, e só avança com aprovação.
 | Fase | Entrega | Depende de | Migração | Ajuste proposto em relação ao pedido |
 |---|---|---|---|---|
 | 0 | Este roadmap, três ADRs, linha de base | — | — | — |
-| 1 | Somente local: sem Groq nem fronteira remota; Ollama fixo em loopback; teste de arquitetura; `3.0.0-SNAPSHOT` | 0 | `V2`: projetos com `groq` passam para `ollama` e modelo padrão (planos e jobs mantêm o provedor histórico, só para exibição) | Incluir a correção A1 (`num_ctx` explícito e falha fechada quando o prompt não couber), porque a CLI só "gera README com Ollama" de verdade com ela (P5). |
-| 2 | Launcher, instância única, porta livre, token de lançamento → cookie, CSRF por `Origin`, diretórios por SO, apagar dados, log local | 1 | `V3`: `owner` passa a ser `local` | Desligamento por inatividade e bandeja opcional (ADR 0001, P2). |
-| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | — | Bloqueio de modelos de nuvem do Ollama (A10). |
+| 1 | Somente local: sem Groq nem fronteira remota; Ollama fixo em loopback; teste de arquitetura; `3.0.0-SNAPSHOT` | 0 | `V2`: projetos com `groq` passam para `ollama` e modelo padrão (planos e jobs mantêm o provedor histórico, só para exibição) | Correção A1 em commit próprio, com teste de regressão do truncamento (P5); modelo padrão `qwen2.5-coder:7b` sem download automático (P6); `vercel.json` → `site/` mínimo (P8). |
+| 2 | Launcher, instância única, porta livre, token de lançamento → Bearer em `sessionStorage`, validação de `Origin`/`Sec-Fetch-Site`, diretórios por SO, apagar dados, log local | 1 | `V3`: `owner` passa a ser `local` | Heartbeat com desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); `%LOCALAPPDATA%\DocGen` no Windows (P3); bandeja opcional. |
+| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | — | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4). |
 | 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V4`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1 e 2 também migram. |
-| 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V5`: anexos de conversa | Guardar só o texto extraído, como hoje, e não o arquivo bruto (P4). |
-| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Autorizar pasta de repositório pela UI (P7). |
+| 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V5`: anexos de conversa | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original; os bytes brutos não ficam salvos (P4). |
+| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). |
 | 7 | Instaladores (`jpackage` + `jlink`) e workflow em matriz | 6 | — | — |
-| 8 | Site estático em `site/` na Vercel | 7 (links dos assets reais) | — | Neutralizar a publicação atual antes (P8). |
+| 8 | Site estático em `site/` na Vercel | 7 (links dos assets reais) | — | A publicação do app já sai na Fase 1 (P8); aqui o `site/` ganha o conteúdo completo. |
 | 9 | Documentação e roteiro E2E manual | 8 | — | — |
 
 ## 8. Riscos
@@ -361,9 +368,9 @@ relatório de fase, e só avança com aprovação.
 |---|---|---|---|---|
 | R1 | Truncamento silencioso do contexto pelo Ollama (A1) | Alto: regras de segurança e instruções perdidas, saída ruim | `num_ctx` explícito, estimativa de tokens com folga, falha fechada quando não couber, corte de histórico com aviso no chat | 1, 4 |
 | R2 | O token de lançamento aparece na linha de comando do navegador (`/proc/<pid>/cmdline` é legível por outros usuários do Linux por padrão) até ser trocado | Médio: em máquina compartilhada, outro usuário pode tentar usar o token antes do navegador | Uso único, validade curta, detecção de colisão (token já usado → revoga a sessão criada com ele e avisa) (ADR 0002) | 2 |
-| R3 | Cookies não são isolados por porta (RFC 6265, §8.5): outro serviço em `127.0.0.1:<outra porta>` recebe o cookie quando o navegador o acessa | Médio | `SameSite=Strict`, sessão que morre com o app, nada de link clicável para loopback ou rede privada na resposta do modelo (ADR 0002) | 2, 4 |
+| R3 | Um XSS na UI leria o token de sessão no `sessionStorage`. O cookie foi descartado porque cookies não são isolados por porta (RFC 6265, §8.5) | Médio | CSP estrita, nenhum *sink* HTML (com teste que varre o código), Markdown do modelo nunca interpretado como HTML, sessão que morre com o app (ADR 0002) | 2, 4 |
 | R4 | A branch do launcher diverge das decisões e já está publicada | Médio: trabalho duplicado | Decidir P1 antes da Fase 2; reaproveitar o que a seção 4.6 lista | 2 |
-| R5 | Modelos de nuvem do Ollama (A10) | Alto: violaria o princípio 1 | Download só de tags do catálogo; bloquear modelo detectado como de nuvem (método a verificar na F3); orientar sobre `OLLAMA_NO_CLOUD` | 3 |
+| R5 | Modelos de nuvem do Ollama (A10) | Alto: violaria o princípio 1 | Defesa em camadas (ADR 0003): catálogo como lista de permitidos para baixar e escolher; rejeitar modelo cuja tag ou cujos metadados indiquem execução remota, verificado na documentação e empiricamente; nenhuma dependência da configuração do Ollama do usuário; onboarding que recomenda o modo só local citando a fonte oficial | 3 |
 | R6 | Cancelar o `/api/pull` pode não interromper o download no Ollama | Médio | Testar com o Ollama real na F3, sem afirmar nada antes | 3 |
 | R7 | O catálogo envelhece rápido (famílias novas a cada poucos meses) e os tamanhos variam por plataforma | Médio | Catálogo versionado com data e `verified`; a UI mostra o tamanho informado pelo Ollama durante o download | 3 |
 | R8 | VRAM livre não é exposta pelo OSHI; sem `nvidia-smi` (AMD, Intel, integradas) a VRAM fica desconhecida; Apple Silicon usa memória unificada | Médio | "Não detectado" em vez de inventar; classificar de forma conservadora quando faltar dado; sondas sem shell e com timeout | 3 |
@@ -374,29 +381,34 @@ relatório de fase, e só avança com aprovação.
 | R13 | Reescrever a autenticação dos testes pode enfraquecer a cobertura de segurança | Médio | Mapear teste antigo para teste novo no relatório da F2; nenhum teste de segurança sai sem substituto | 2 |
 | R14 | Dados locais ficam sem criptografia em repouso (H2 em arquivo) | Baixo | Diretório `0700`; documentar que a criptografia de disco é do SO | 2, 9 |
 | R15 | Ambiente de desenvolvimento sem JDK 21 (só JBR 25 e OpenJDK 27) | Baixo | Build com `--release 21`; a CI com Temurin 21 continua sendo a referência | todas |
-| R16 | Com a UI no navegador, fechar a aba não encerra o processo, e o usuário pode não perceber que o app segue rodando | Médio | Ícone de bandeja quando houver suporte; desligamento por inatividade quando não houver aba conectada nem download ou geração em andamento (P2) | 2 |
+| R16 | Com a UI no navegador, fechar a aba não encerra o processo, e o usuário pode não perceber que o app segue rodando | Médio | Heartbeat da UI e desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); ícone de bandeja quando houver suporte | 2 |
+| R17 | Modelos com modo de raciocínio (Qwen3+) misturam o raciocínio à resposta | Médio: documentação poluída ou reprovada pelo validador | Tratamento explícito do raciocínio antes do `DocumentationValidator`, do parser e da tela (§6.4) | 3 |
 
-## 9. Perguntas para decidir
+## 9. Decisões tomadas na aprovação da Fase 0 (2026-10-24)
 
-1. **P1, branch do launcher.** Proponho seguir as decisões 4.1/4.2 a partir de `main` e reaproveitar só os
-   itens da seção 4.6. A alternativa é partir da branch existente. A comparação está no ADR 0001.
-2. **P2, ciclo de vida.** Posso implementar o desligamento por inatividade (sem aba conectada por 10 min e
-   nada em andamento), além do "Sair" e da bandeja opcional?
-3. **P3, Windows.** Proponho `%LOCALAPPDATA%\DocGen` em vez de `%APPDATA%\DocGen`: o `AppData\Roaming` é
-   sincronizado com o servidor em perfis móveis de domínio, o que levaria conversas para fora do computador.
-4. **P4, anexos.** Proponho manter a política atual: só o texto extraído e redigido fica salvo, e os bytes
-   brutos são apagados depois da extração. Ou você quer o arquivo original guardado junto com a conversa?
-5. **P5, correção A1 na Fase 1.** Posso incluir `num_ctx` explícito e falha fechada já na Fase 1?
-6. **P6, modelo padrão da CLI.** Candidatos verificados: `qwen2.5-coder:7b` (4,7 GB, 32K, sem *thinking*,
-   orientado a código), `qwen3:8b` (5,2 GB, 40K, com *thinking*) e `qwen3.5:9b` (6,6–7,6 GB, 256K). Proponho
-   `qwen2.5-coder:7b`, com o prompt de repositório limitado ao contexto do modelo.
-7. **P7, repositórios no app.** Para "gere um README deste projeto" sem terminal, o backend pode abrir o
-   seletor de pastas nativo do SO e registrar a pasta escolhida como autorizada. Isso entra na Fase 6?
-8. **P8, Vercel.** Posso já, na Fase 1, trocar o `vercel.json` para não publicar o app (página mínima
-   provisória), antes do site da Fase 8?
-9. **P9, fluxo de branches.** Cada fase sai de `main`, mas eu não faço push nem merge sem você. Prefere fazer
-   o merge de cada fase em `main` antes da seguinte, ou que eu crie a próxima fase a partir da branch da fase
-   anterior?
+| # | Tema | Decisão |
+|---|---|---|
+| P1 | Branch do launcher | Seguir 4.1/4.2 a partir de `main`. Aproveitar só a trava de instância, os diretórios privados, a abertura do navegador e os scripts `jlink`. Não alterar `feat/docgen-desktop-launcher`. |
+| P2 | Ciclo de vida | Heartbeat da UI; desligar após 10 min sem heartbeat, **nunca** com download ou geração em andamento. Fase 2. |
+| P3 | Windows | `%LOCALAPPDATA%\DocGen`. |
+| P4 | Anexos | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original. |
+| P5 | Contexto | Na Fase 1, em commit separado: `num_ctx` explícito, dimensionado pelo tamanho estimado do prompt, com teto no contexto máximo do modelo; falha fechada com erro claro quando não couber; teste de regressão que reproduz o truncamento medido. |
+| P6 | Modelo padrão da CLI | `qwen2.5-coder:7b`. Se não estiver instalado, a CLI falha com mensagem amigável e não baixa sozinha. Requisito registrado: modelos com modo de raciocínio (Qwen3+) exigem tratamento do raciocínio antes do `DocumentationValidator` (§6.4). |
+| P7 | Repositórios no app | Fase 6. O navegador não fornece o caminho real da pasta: diálogo nativo aberto pelo processo Java, ou caminho digitado e validado pelas mesmas regras do `RepoScanner`, revogável pela UI. |
+| P8 | Vercel | Fase 1: `vercel.json` aponta para `site/` com uma página estática mínima ("DocGen Desktop em desenvolvimento" + link do repositório), sem o frontend do app. |
+| P9 | Fluxo de branches | Um PR por fase para `main`; o revisor faz o merge e a fase seguinte parte de `main` atualizado. Nada de push sem autorização: ao fim de cada fase, aviso que a branch está pronta para PR. |
+
+Revisões aprovadas junto com a Fase 0:
+
+- **ADR 0002:** o cookie foi substituído por um token de sessão Bearer guardado só no `sessionStorage` e
+  enviado no cabeçalho `Authorization`, porque cookies não são isolados por porta. As validações de `Host` e
+  de `Origin`/`Sec-Fetch-Site` ficam como defesa em profundidade, e o streaming do chat usa `fetch` +
+  `ReadableStream`.
+- **ADR 0003:** defesa em camadas contra modelos de nuvem do Ollama (lista de permitidos pelo catálogo;
+  rejeição por tag ou metadados; verificação documental e empírica do `/api/show`; nenhuma dependência da
+  configuração local do Ollama; onboarding com o modo só local e a fonte oficial).
+- **Catálogo:** as famílias novas entram só com tags verificadas; tamanho em faixa usa o limite superior na
+  estimativa de memória.
 
 ## 10. Fontes consultadas (2026-10-24)
 
