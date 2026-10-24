@@ -6,18 +6,18 @@ O DocGen trata repositórios, descrições de projeto, PDFs anexados e respostas
 
 ### Documentação de repositórios (CLI e API de análise)
 
-O DocGen lê arquivos de texto do repositório e envia trechos selecionados e redigidos ao provedor configurado. Em cada uma das duas requisições de geração vão:
+O DocGen lê arquivos de texto do repositório e envia trechos selecionados e redigidos ao Ollama local, o único provedor. Em cada uma das duas requisições de geração vão:
 
 - o conteúdo redigido de cada arquivo incluído (limites rígidos de 20.000 caracteres por arquivo e 120.000 no total);
 - os caminhos relativos redigidos dos arquivos incluídos (também como árvore limitada);
 - nomes e motivos, limitados e redigidos, dos arquivos pulados por limite de conteúdo;
-- somente no Groq: o nome do modelo e a `GROQ_API_KEY` no cabeçalho de autorização, com destino a `https://api.groq.com`.
+- o nome do modelo e as opções `num_ctx` e `num_predict`.
 
-O Groq faz no máximo três tentativas por prompt após erros de limite de taxa ou de servidor. As requisições ao Ollama vão direto ao loopback IPv4 `http://127.0.0.1:11434`, com proxies da JVM desativados para esse cliente local sem TLS. Nomes de arquivos sensíveis, ignorados ou não suportados e snapshots de pré-visualização nunca entram em prompts. O endpoint `POST /api/v1/repositories/{id}/analysis` apenas analisa: não constrói provedor nem envia nada.
+As requisições vão direto ao loopback IPv4 `http://127.0.0.1` (porta padrão `11434`), com proxies da JVM desativados para esse cliente local sem TLS e sem seguir redirecionamentos. O host não é configurável. Nenhum conteúdo sai do computador. Nomes de arquivos sensíveis, ignorados ou não suportados e snapshots de pré-visualização nunca entram em prompts. O endpoint `POST /api/v1/repositories/{id}/analysis` apenas analisa: não constrói provedor nem envia nada.
 
 ### Projetos, PDFs e planejamento (DocGen Web)
 
-Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, tecnologias e restrições do projeto, mais o texto extraído dos PDFs (redigido, normalizado e limitado a um orçamento de 30.000 caracteres, com o prompt inteiro limitado a 64.000). Na geração de documentação vão os mesmos dados do projeto e o plano aprovado, sem o texto dos anexos. Antes de qualquer envio a um provedor remoto, o usuário vê o destino, o modelo, o tamanho exato em caracteres e a lista do que será incluído.
+Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, tecnologias e restrições do projeto, mais o texto extraído dos PDFs (redigido, normalizado e limitado a um orçamento de 30.000 caracteres, com o prompt inteiro limitado a 64.000). Na geração de documentação vão os mesmos dados do projeto e o plano aprovado, sem o texto dos anexos. Tudo vai apenas para o Ollama local.
 
 ## Controles do pipeline de repositórios, na ordem em que se aplicam
 
@@ -33,10 +33,10 @@ Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, t
    - negação em `.docgenignore` é rejeitada.
 5. **Allowlist opcional** `--include-ext`, que só restringe a seleção.
 6. **Redação de segredos** sobre o arquivo completo e limitado antes do truncamento, e sobre cada caminho e item de pulo visível no prompt.
-7. **Preflight:** depois da varredura (exceto em `--dry-run`), o par de documentação ou de pré-visualização é verificado antes de construir prompts ou inicializar provedores. Diretório ausente ou inseguro e conflito de sobrescrita falham aqui, sem chamada remota.
+7. **Preflight:** depois da varredura (exceto em `--dry-run`), o par de documentação ou de pré-visualização é verificado antes de construir prompts ou inicializar provedores. Diretório ausente ou inseguro e conflito de sobrescrita falham aqui, sem chamada ao modelo.
 8. **Fronteira do prompt:** o conteúdo vai embrulhado como dado não confiável, tags que imitam delimitadores são neutralizadas e as instruções são reafirmadas após o bloco.
-9. **Consentimento:** o serviço reutilizável exige permissão remota explícita e um callback de consentimento positivo antes de chamar o Groq. Na CLI, isso significa `--allow-remote` mais confirmação y/N, ou `--allow-remote` mais `--yes` sem console. `--yes` é exclusivo da CLI e não dá autoridade a nenhuma outra interface.
-10. **Validação do provedor:** corpos de erro são descartados, o acúmulo da resposta é limitado e os marcadores de conclusão do Groq e do Ollama precisam indicar resultado completo. A resposta NDJSON do Ollama tem teto de 16 MiB e é recebida dentro da troca HTTP com prazo.
+9. **Janela de contexto:** antes de enviar, o provedor obtém do Ollama o contexto máximo do modelo e calcula `num_ctx` com uma estimativa conservadora dos tokens do prompt mais a reserva da resposta. Se não couber, a operação falha antes de qualquer envio (`PromptTooLargeException`). Sem esse controle, o Ollama usa 4k tokens abaixo de 24 GiB de VRAM e corta em silêncio o início de prompts maiores, que é onde ficam as regras de segurança (medido: 109.951 caracteres viraram 2.050 tokens). `num_predict` limita a resposta à reserva, para que a geração não empurre o prompt para fora da janela.
+10. **Validação do provedor:** corpos de erro são descartados, o acúmulo da resposta é limitado e o marcador de conclusão do Ollama precisa indicar resultado completo. A resposta NDJSON tem teto de 16 MiB e é recebida dentro da troca HTTP com prazo. Se o `prompt_eval_count` informado for implausivelmente baixo para o tamanho do prompt, a resposta é descartada (`PromptTruncatedException`).
 11. **Validação da saída:** o texto gerado é redigido de novo, limitado a 2.000.000 caracteres, verificado quanto a Unicode e caracteres de controle, obrigado a começar com H1 e restrito a Markdown passivo com links web ou relativos.
 12. **Publicação transacional:** o writer repete o preflight, prepara as duas saídas por canais `CREATE_NEW` relativos a handles, força a gravação em disco onde há suporte e só então publica o par com reversão. O diretório de saída precisa existir e ser confiável e não compartilhado. Diretórios POSIX graváveis por grupo ou outros, caminhos com symlink ou não verificáveis são recusados. Destinos existentes exigem `--force`.
 13. **Inspeção:** `--dry-run` e `--preview-prompt` não contatam provedores. Pré-visualizações usam permissões privadas POSIX quando disponíveis e não são substituídas sem `--force`.
@@ -82,16 +82,11 @@ O CSRF depende de o navegador anexar credenciais automaticamente. Aqui, nenhuma 
 - O texto extraído é normalizado (controles e caracteres invisíveis removidos) e redigido antes de ser persistido. O arquivo temporário é apagado em qualquer desfecho, e o staging é limpo na inicialização.
 - Duplicatas (mesmo SHA-256 no projeto) são rejeitadas. Os logs do PDFBox ficam em `ERROR`, para não registrar detalhes derivados do documento.
 
-### Consentimento para transmissão remota
+### Somente local
 
-- **Gate do operador:** provedores remotos ficam indisponíveis a menos que o servidor rode com `DOCGEN_ALLOW_REMOTE=true`.
-- **Consentimento por operação:** `POST /projects/{id}/transmission-previews` monta o prompt exato, mostra destino, modelo, tamanho e dados incluídos, e devolve um token de uso único, válido por 10 min, amarrado a usuário, projeto, operação (`PLAN` ou `DOCUMENTATION`), provedor, modelo e **SHA-256 do prompt**. O job só é aceito com esse token; qualquer mudança no projeto, nos anexos ou no plano muda o digest e gera `409 consent_stale`. Tokens são consumidos mesmo quando a verificação falha.
-- O consentimento é distinto da autenticação: estar logado não autoriza envio nenhum. O diálogo do workspace só habilita "Autorizar e enviar" depois que o usuário marca a caixa de autorização, e cancelar não transmite nada.
-- Provedores locais (Ollama) não exigem token: os dados não saem da máquina.
-
-### Credenciais de provedores
-
-`GROQ_API_KEY` é lida apenas do ambiente do servidor e usada só no cabeçalho para `https://api.groq.com`. O navegador nunca a recebe: `GET /providers` informa apenas se ela existe (`configured`). Os endpoints dos provedores são fixos no código, e nenhuma URL de provedor vem de requisição.
+- O único provedor é o Ollama em `127.0.0.1`. O host é o literal de loopback, sem resolução de nome e sem configuração; só a porta muda (`docgen.ollama.port`, padrão `11434`). Não existe provedor remoto, chave de API nem consentimento de envio, porque nada sai do computador.
+- Um modelo que não está instalado gera erro (`model_not_installed`), e o DocGen nunca pede download ao Ollama por conta própria.
+- `LocalOnlyArchitectureTest` reprova o build quando o código de produção de qualquer módulo contém uma URI HTTP(S) fora do loopback (salvo identificadores que nunca são buscados, como o namespace do SVG), usa APIs de conexão fora do cliente Ollama ou implementa outro `LLMProvider`. A varredura não prova a ausência de tráfego em tempo de execução, mas impede as regressões óbvias. Os testes do frontend fazem o mesmo para URLs absolutas e caminhos fora de `/api/v1/`.
 
 ### Proteção contra XSS e conteúdo ativo
 
@@ -132,12 +127,14 @@ Abra um security advisory privado ou contate o proprietário do repositório ant
 ## Limitações conhecidas
 
 - **A redação de segredos é baseada em padrões.** Ela cobre formatos comuns de tokens de nuvem e SaaS (AWS, Google, GitHub, GitLab, Slack, Stripe, SendGrid, Twilio, npm, PyPI, Hugging Face, DigitalOcean, Shopify, Azure, JWTs, blocos de chave privada, credenciais em URLs e em atribuições), mas não reconhece formatos proprietários ou sem prefixo, segredos divididos em linhas nem valores codificados ou ofuscados. Isso vale também para PDFs: não anexe documentos com credenciais. Use `.docgenignore`, `--dry-run` e `--preview-prompt` para inspecionar antes de enviar.
+- **A janela de contexto vem de uma estimativa.** O Ollama não oferece contagem exata de tokens, então o `num_ctx` sai de uma estimativa calibrada contra o tokenizador Qwen2.5. Ela ficou acima da contagem real em todas as classes de texto medidas (código, prosa, JSON, CJK, emoji, base64, hex, números e pontuação), mas um modelo de outra família ou um texto fora dessas classes pode tokenizar pior. A checagem do `prompt_eval_count` é a segunda barreira e só detecta truncamentos grandes.
+- **Modelos de nuvem do Ollama ainda não são bloqueados.** O próprio Ollama pode executar modelos na nuvem de ollama.com. Nesta versão, o DocGen não impede que `--model` aponte para um modelo desses; o bloqueio em camadas está planejado para a Fase 3. Até lá, use só modelos locais ou ligue o modo só local do Ollama (`OLLAMA_NO_CLOUD=1`, segundo a documentação oficial).
 - **As defesas contra prompt injection são mitigações, não garantias.** Delimitadores de dado não confiável, neutralização de tags e reforço após o bloco reduzem a chance de o conteúdo (do repositório ou de um PDF) direcionar o modelo, mas nenhum prompt elimina esse risco.
 - **A validação garante forma, não verdade.** Planos e documentos podem conter erros, recomendações inadequadas ou conteúdo de engenharia social. A aprovação de um plano registra que alguém o revisou; não o torna correto.
 - **`.docgenignore` não suporta negação.** Os padrões só excluem; uma linha com `!` faz a varredura falhar em vez de ser ignorada em silêncio.
 - **A travessia segura não é portável para todo sistema de arquivos.** Provedores sem `SecureDirectoryStream` falham fechados. Symlinks e renomeações de ancestrais são contidos, mas o Java NIO portátil não distingue hardlink ou bind mount de um inode legítimo dentro da raiz; não analise repositórios graváveis por um usuário local não confiável.
 - **A escrita do par é reversível, não um journal contra quedas.** Sincronizações reduzem perdas, mas uma falha abrupta entre publicações pode deixar um arquivo de recuperação ou um par misto que exige inspeção manual. O NIO portátil também não tem unlink ou chmod condicionais por identidade, não preserva todos os ACLs e xattrs e não se defende de um processo hostil da mesma conta alterando um diretório compartilhado entre as verificações. Use um diretório de saída existente, confiável e não compartilhado; em POSIX, ele não pode ser gravável por grupo ou outros usuários.
-- **A aplicação web é local e de baixa escala.** Sessões, consentimentos e o controle de tentativas ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token web fica no `sessionStorage` da aba, então um XSS poderia lê-lo; a CSP estrita e a ausência de sinks HTML são as mitigações.
+- **A aplicação web é local e de baixa escala.** Sessões e o controle de tentativas ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token web fica no `sessionStorage` da aba, então um XSS poderia lê-lo; a CSP estrita e a ausência de sinks HTML são as mitigações.
 - **PDFs:** sem OCR; o texto pode sair fora de ordem em layouts complexos; o limite de 200.000 caracteres trunca documentos longos, e isso é sinalizado na interface.
 - **A verificação de assinatura é tão forte quanto o workflow.** A assinatura keyless autentica a identidade do `release.yml` e a tag; a garantia de que os bytes assinados vieram do build depende de revisar esse workflow. Ela não comprova a ausência de código malicioso no repositório naquela tag.
 
