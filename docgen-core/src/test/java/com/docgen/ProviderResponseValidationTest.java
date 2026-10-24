@@ -47,8 +47,8 @@ class ProviderResponseValidationTest {
     }
 
     @Test
-    void groqBoundsSuccessfulResponseBytesBeforeMaterializingTheBody() throws Exception {
-        HttpResponse.BodySubscriber<String> accepted = GroqProvider.boundedUtf8BodySubscriber(5);
+    void boundsSuccessfulResponseBytesBeforeMaterializingTheBody() throws Exception {
+        HttpResponse.BodySubscriber<String> accepted = BoundedUtf8BodySubscriber.of(5, "Provider");
         TestSubscription acceptedSubscription = new TestSubscription();
         accepted.onSubscribe(acceptedSubscription);
         accepted.onNext(List.of(ByteBuffer.wrap("hello".getBytes(StandardCharsets.UTF_8))));
@@ -57,7 +57,7 @@ class ProviderResponseValidationTest {
         assertEquals("hello", accepted.getBody().toCompletableFuture().get());
         assertFalse(acceptedSubscription.cancelled);
 
-        HttpResponse.BodySubscriber<String> rejected = GroqProvider.boundedUtf8BodySubscriber(5);
+        HttpResponse.BodySubscriber<String> rejected = BoundedUtf8BodySubscriber.of(5, "Provider");
         TestSubscription rejectedSubscription = new TestSubscription();
         rejected.onSubscribe(rejectedSubscription);
         rejected.onNext(List.of(

@@ -98,7 +98,7 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     static HttpResponse.BodySubscriber<String> boundedResponseBodySubscriber(int maxBytes) {
-        return GroqProvider.boundedUtf8BodySubscriber(maxBytes, "Ollama");
+        return BoundedUtf8BodySubscriber.of(maxBytes, "Ollama");
     }
 
     private void ensureOllamaIsRunning() throws IOException, InterruptedException {
