@@ -74,6 +74,34 @@ class OllamaContextWindowTest {
     }
 
     @Test
+    void aPromptExactlyAtTheLimitIsSentAndOneTokenOverIsRefused() throws Exception {
+        String prompt = "Explique a arquitetura deste módulo em português.\n".repeat(400);
+        int needed = PromptTokens.estimate(prompt) + OllamaProvider.OUTPUT_RESERVE_TOKENS;
+
+        try (FakeOllamaServer ollama = new FakeOllamaServer().modelContextTokens(needed)) {
+            provider(ollama).generateDocumentation(prompt);
+
+            assertEquals(needed, ollama.generateRequests().getFirst().path("options").path("num_ctx").asInt(),
+                    "at the limit the window is the model maximum, which still holds prompt and answer");
+        }
+        try (FakeOllamaServer ollama = new FakeOllamaServer().modelContextTokens(needed - 1)) {
+            assertThrows(PromptTooLargeException.class, () -> provider(ollama).generateDocumentation(prompt));
+            assertTrue(ollama.generateRequests().isEmpty(), "one token over the limit sends nothing");
+        }
+    }
+
+    @Test
+    void theWindowAlwaysReservesRoomForTheAnswer() throws Exception {
+        for (int lines : new int[]{0, 1, 10, 100, 1_000, 5_000}) {
+            String prompt = "item 42: valor = 3.14; // comentário\n".repeat(lines);
+            int window = OllamaProvider.contextWindowFor(prompt, 262_144, "m");
+
+            assertTrue(window >= PromptTokens.estimate(prompt) + OllamaProvider.OUTPUT_RESERVE_TOKENS,
+                    lines + " lines: num_ctx " + window + " must hold the estimated prompt plus the answer reserve");
+        }
+    }
+
+    @Test
     void theWindowNeverExceedsTheModelMaximum() throws Exception {
         assertEquals(9_000, OllamaProvider.contextWindowFor("hello", 9_000, "m"));
         assertThrows(PromptTooLargeException.class, () -> OllamaProvider.contextWindowFor("hello", 8_000, "m"));
