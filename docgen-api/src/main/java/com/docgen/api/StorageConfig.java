@@ -86,7 +86,7 @@ class StorageConfig {
         return path;
     }
 
-    private static void clearStaleStagingFiles(Path staging) throws IOException {
+    static void clearStaleStagingFiles(Path staging) throws IOException {
         try (Stream<Path> entries = Files.list(staging)) {
             for (Path entry : entries.toList()) {
                 if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {

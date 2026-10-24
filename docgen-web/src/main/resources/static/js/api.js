@@ -130,6 +130,7 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
       await post('/api/v1/desktop/shutdown');
       tokenStore.clear();
     },
+    eraseAllData: () => request('DELETE', '/api/v1/data'),
 
     listProjects: () => request('GET', '/api/v1/projects'),
     getProject: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}`),

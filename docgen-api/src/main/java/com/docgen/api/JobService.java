@@ -188,6 +188,11 @@ class JobService {
         cancelAll(jobs.activeIdsForProject(projectId, owner), "The project was deleted.");
     }
 
+    /** Cancels every active job of the owner, used before all data is erased. */
+    void cancelAllJobs(String owner) {
+        cancelAll(jobs.activeIds(owner), "All data was erased.");
+    }
+
     private void cancelAll(List<String> ids, String reason) {
         for (String id : ids) {
             Instant now = clock.instant();

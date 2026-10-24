@@ -210,6 +210,39 @@ class DesktopLauncherTest {
     }
 
     @Test
+    void erasedDataDoesNotLingerInTheDatabaseFileAfterExit() throws Exception {
+        DesktopLauncher.Instance instance = assertInstanceOf(DesktopLauncher.Outcome.Running.class, start()).instance();
+        String session = exchange(nextWindow());
+        String marker = "MarcadorSecretoDoUsuario" + System.nanoTime();
+        HttpResponse<String> created = send(HttpRequest.newBuilder(api(instance.port(), "/api/v1/projects"))
+                .header("Authorization", "Bearer " + session)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""
+                        {"name": "%s", "description": "Projeto com um marcador para provar que a remoção é real.",
+                         "functionalRequirements": [], "nonFunctionalRequirements": [], "preferredTechnologies": [],
+                         "constraints": [], "provider": "ollama", "outputLanguage": "pt-BR"}
+                        """.formatted(marker))));
+        assertEquals(201, created.statusCode(), created.body());
+        // Precondition, or the test proves nothing: H2 has written the row to the file.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (!fileContains(marker) && System.nanoTime() < deadline) {
+            Thread.sleep(100);
+        }
+        assertTrue(fileContains(marker), "the project reached the database file");
+
+        assertEquals(204, send(HttpRequest.newBuilder(api(instance.port(), "/api/v1/data"))
+                .header("Authorization", "Bearer " + session).DELETE()).statusCode());
+        // H2 alone compacts for at most 200 ms when it closes, which covers a small database like this one but
+        // not a large one; the erasure therefore asks for a full SHUTDOWN COMPACT at exit.
+        assertTrue(Files.exists(data.resolve("compact-on-exit")), "the erasure asked for a full compaction");
+        instance.requestShutdown("test");
+        assertTrue(instance.awaitStopped(Duration.ofSeconds(20)));
+
+        assertFalse(fileContains(marker), "the deleted project must not survive in the database file");
+        assertFalse(Files.exists(data.resolve("compact-on-exit")), "the compaction ran at exit");
+    }
+
+    @Test
     void whenNoBrowserOpensTheUserCanCopyAFreshLink() throws Exception {
         DesktopLauncher.Outcome outcome = DesktopLauncher.start(settings(address -> false, Duration.ofSeconds(3)));
         running.add(assertInstanceOf(DesktopLauncher.Outcome.Running.class, outcome).instance());
@@ -254,6 +287,11 @@ class DesktopLauncherTest {
         nextWindow();
 
         assertEquals(instance.port(), InstanceFile.read(data).orElseThrow().port());
+    }
+
+    private boolean fileContains(String marker) throws IOException {
+        byte[] database = Files.readAllBytes(data.resolve("docgen.mv.db"));
+        return new String(database, StandardCharsets.ISO_8859_1).contains(marker);
     }
 
     /** Java's HttpClient refuses to send a forged Host header, so this one is written by hand. */

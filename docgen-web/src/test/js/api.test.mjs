@@ -47,7 +47,7 @@ test('a launch token becomes the session, sent afterwards only in the Authorizat
 });
 
 test('leaving the app stops the server and forgets the session', async () => {
-  const { calls, fetchImpl } = recorder(response(202, null));
+  const { calls, fetchImpl } = recorder(response(202, null), response(204, null));
   const tokens = memoryTokenStore();
   tokens.set('tok');
   const api = createApi({ fetchImpl, tokenStore: tokens });
@@ -56,6 +56,11 @@ test('leaving the app stops the server and forgets the session', async () => {
   assert.equal(calls[0].url, '/api/v1/desktop/shutdown');
   assert.equal(calls[0].options.method, 'POST');
   assert.equal(tokens.get(), null);
+
+  tokens.set('tok');
+  await api.eraseAllData();
+  assert.equal(calls[1].url, '/api/v1/data');
+  assert.equal(calls[1].options.method, 'DELETE');
 });
 
 test('heartbeats are authenticated POSTs to the desktop route', async () => {

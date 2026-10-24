@@ -136,6 +136,13 @@ class JobRepository {
                 .list();
     }
 
+    List<String> activeIds(String owner) {
+        return jdbc.sql("SELECT id FROM jobs WHERE owner = :owner AND status IN ('QUEUED', 'RUNNING')")
+                .param("owner", owner)
+                .query(String.class)
+                .list();
+    }
+
     int countActive(String owner) {
         return jdbc.sql("SELECT COUNT(*) FROM jobs WHERE owner = :owner AND status IN ('QUEUED', 'RUNNING')")
                 .param("owner", owner)
