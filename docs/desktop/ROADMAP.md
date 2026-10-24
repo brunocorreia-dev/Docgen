@@ -344,6 +344,26 @@ Tipos: `app-image`, `exe`, `msi`, `rpm`, `deb`, `pkg`, `dmg`. Cada formato é ge
 compilação cruzada. Pré-requisitos: `rpm-build` (RPM), `fakeroot` (Ubuntu/deb), WiX 3.0 ou superior
 (Windows) e as ferramentas de linha de comando do Xcode quando houver `--mac-sign` ou ícone de DMG.
 
+### 6.6 Janela de contexto (registrado na aprovação da Fase 1)
+
+A Fase 1 implementou o `num_ctx` explícito: estimativa conservadora do prompt (`PromptTokens`) mais 8.192
+tokens de reserva para a resposta, com teto no contexto máximo do modelo e falha fechada quando não couber.
+Ficam registrados:
+
+- **O estimador é calibrado para a família Qwen** (tokenizador Qwen2.5, contagens medidas no Ollama 0.32.11).
+  Para outras famílias de modelo, a estimativa é **melhor esforço**; a checagem do `prompt_eval_count` segue
+  como segunda barreira.
+- **Fase 3:** classificar `ConnectException` (Ollama fora do ar) como `provider_unavailable`. Hoje o
+  `HttpExchange` embrulha a exceção, e o caso vira `provider_failed`.
+- **Fase 4, chat:** o `num_ctx` deve ser **estável por conversa** e subir só em degraus (4k → 8k → 16k → 32k,
+  limitado ao máximo do modelo), porque cada mudança de `num_ctx` faz o Ollama recarregar o modelo. O degrau
+  sobe quando o histórico mais a reserva de saída não cabem mais, e o corte de histórico antigo, com aviso
+  visível, só entra quando o degrau máximo foi atingido.
+- **Fase 6, orçamento da varredura:** o orçamento de conteúdo do `RepoScanner` passa a ser derivado do
+  contexto do modelo menos a reserva de saída (e menos as regras do prompt), em vez dos 120.000 caracteres
+  fixos. Os arquivos são priorizados (README, arquivos de build, pontos de entrada antes do resto), e o
+  relatório mostra o que ficou de fora e por quê. O limite só restringe, nunca amplia, a seleção atual.
+
 ## 7. Ordem de execução
 
 As fases seguem a ordem do pedido. Cada uma termina com `mvn -B verify` e `node --test` verdes e com o
@@ -353,11 +373,11 @@ relatório de fase, e só avança com aprovação.
 |---|---|---|---|---|
 | 0 | Este roadmap, três ADRs, linha de base | — | — | — |
 | 1 | Somente local: sem Groq nem fronteira remota; Ollama fixo em loopback; teste de arquitetura; `3.0.0-SNAPSHOT` | 0 | `V2`: projetos com `groq` passam para `ollama` e modelo padrão (planos e jobs mantêm o provedor histórico, só para exibição) | Correção A1 em commit próprio, com teste de regressão do truncamento (P5); modelo padrão `qwen2.5-coder:7b` sem download automático (P6); `vercel.json` → `site/` mínimo (P8). |
-| 2 | Launcher, instância única, porta livre, token de lançamento → Bearer em `sessionStorage`, validação de `Origin`/`Sec-Fetch-Site`, diretórios por SO, apagar dados, log local | 1 | `V3`: `owner` passa a ser `local` | Heartbeat com desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); `%LOCALAPPDATA%\DocGen` no Windows (P3); bandeja opcional. |
-| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | — | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4). |
-| 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V4`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1 e 2 também migram. |
+| 2 | Launcher, instância única, porta livre, token de lançamento → Bearer em `sessionStorage`, validação de `Origin`/`Sec-Fetch-Site`, diretórios por SO, apagar dados, log local | 1 | `V3`: `owner` passa a ser a constante `local`, e a coluna é mantida | Heartbeat com desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); `%LOCALAPPDATA%\DocGen` no Windows (P3); sessão com 12 h de inatividade, só em memória; bandeja opcional. |
+| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | — | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4); `ConnectException` passa a ser classificado como `provider_unavailable` (§6.6). |
+| 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V4`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1 e 2 também migram. O `num_ctx` do chat é estável por conversa e sobe em degraus (§6.6). |
 | 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V5`: anexos de conversa | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original; os bytes brutos não ficam salvos (P4). |
-| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). |
+| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). Orçamento da varredura derivado do contexto do modelo (§6.6). |
 | 7 | Instaladores (`jpackage` + `jlink`) e workflow em matriz | 6 | — | — |
 | 8 | Site estático em `site/` na Vercel | 7 (links dos assets reais) | — | A publicação do app já sai na Fase 1 (P8); aqui o `site/` ganha o conteúdo completo. |
 | 9 | Documentação e roteiro E2E manual | 8 | — | — |
@@ -366,7 +386,7 @@ relatório de fase, e só avança com aprovação.
 
 | # | Risco | Impacto | Mitigação | Fase |
 |---|---|---|---|---|
-| R1 | Truncamento silencioso do contexto pelo Ollama (A1) | Alto: regras de segurança e instruções perdidas, saída ruim | `num_ctx` explícito, estimativa de tokens com folga, falha fechada quando não couber, corte de histórico com aviso no chat | 1, 4 |
+| R1 | Truncamento silencioso do contexto pelo Ollama (A1) | Alto: regras de segurança e instruções perdidas, saída ruim | `num_ctx` explícito, estimativa de tokens com folga (calibrada para Qwen; outras famílias são melhor esforço), falha fechada quando não couber, `num_ctx` em degraus e corte de histórico com aviso no chat (§6.6) | 1, 4 |
 | R2 | O token de lançamento aparece na linha de comando do navegador (`/proc/<pid>/cmdline` é legível por outros usuários do Linux por padrão) até ser trocado | Médio: em máquina compartilhada, outro usuário pode tentar usar o token antes do navegador | Uso único, validade curta, detecção de colisão (token já usado → revoga a sessão criada com ele e avisa) (ADR 0002) | 2 |
 | R3 | Um XSS na UI leria o token de sessão no `sessionStorage`. O cookie foi descartado porque cookies não são isolados por porta (RFC 6265, §8.5) | Médio | CSP estrita, nenhum *sink* HTML (com teste que varre o código), Markdown do modelo nunca interpretado como HTML, sessão que morre com o app (ADR 0002) | 2, 4 |
 | R4 | A branch do launcher diverge das decisões e já está publicada | Médio: trabalho duplicado | Decidir P1 antes da Fase 2; reaproveitar o que a seção 4.6 lista | 2 |
@@ -409,6 +429,16 @@ Revisões aprovadas junto com a Fase 0:
   configuração local do Ollama; onboarding com o modo só local e a fonte oficial).
 - **Catálogo:** as famílias novas entram só com tags verificadas; tamanho em faixa usa o limite superior na
   estimativa de memória.
+
+Respostas registradas na aprovação da Fase 1:
+
+- **Sessão:** 12 h de inatividade, sessões somente em memória; reiniciar o app invalida todas (ADR 0002).
+- **`V3`:** dono fixo `local`, mantendo a coluna `owner` com esse valor constante em vez de removê-la.
+- **Orçamento da varredura:** proposta para a Fase 6 (§6.6).
+- **Janela de contexto:** chat com `num_ctx` estável e em degraus na Fase 4; estimador calibrado para Qwen, as
+  demais famílias como melhor esforço; correção do `provider_unavailable` na Fase 3 (§6.6).
+- **Fluxo de merge:** um PR por fase, com merge commit e sem squash, depois da CI verde com Temurin 21. A Fase 0
+  entra primeiro.
 
 ## 10. Fontes consultadas (2026-10-24)
 

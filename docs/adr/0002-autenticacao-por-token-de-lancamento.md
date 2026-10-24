@@ -54,14 +54,15 @@ navegador acessar, e `SameSite` não ajuda, porque o mesmo host em outra porta �
 - O navegador o envia **apenas** no cabeçalho `Authorization: Bearer`. **Não existe cookie** de nenhum tipo.
   `Basic` deixa de ser aceito, e saem `AuthController`, `LoginThrottle`, `ThrottledAuthenticationManager`, o
   `UserDetailsService` e a tela `login.js`.
-- **Validade (proposta):** o tempo de vida do processo, com expiração por inatividade de 12 h. O heartbeat da
-  UI (ADR 0001) conta como atividade.
+- **Validade (decidida na aprovação da Fase 1):** expiração por inatividade de 12 h, e sessões **somente em
+  memória**: reiniciar o app invalida todas. O heartbeat da UI (ADR 0001) conta como atividade.
 - Cada aba tem a própria sessão: uma aba nova não herda o `sessionStorage` e cai na mensagem "abra pelo
   atalho do DocGen". Abrir o app de novo gera um token de lançamento novo.
 - **Streaming do chat:** `fetch` + `ReadableStream`, que permite mandar o cabeçalho `Authorization` (o
   `EventSource` não permite).
-- O dono dos recursos passa a ser fixo (proposta: `local`), com migração dos donos antigos. O filtro por
-  `owner` continua em todas as consultas.
+- O dono dos recursos passa a ser fixo, `local` (decidido na aprovação da Fase 1). A coluna `owner` é mantida
+  com esse valor constante, e não removida; a migração `V3` converte os donos antigos. O filtro por `owner`
+  continua em todas as consultas.
 
 ### Defesa em profundidade no servidor
 
