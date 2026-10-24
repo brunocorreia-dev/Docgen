@@ -7,11 +7,9 @@ import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
 import java.io.IOException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
@@ -43,15 +41,15 @@ class StorageConfig {
         Path data;
         boolean temporary = storage.inMemory();
         if (temporary) {
-            data = posix()
+            data = PrivateFiles.posix()
                     ? Files.createTempDirectory("docgen-", PosixFilePermissions.asFileAttribute(OWNER_ONLY))
                     : Files.createTempDirectory("docgen-");
         } else {
             data = resolveDataDirectory(storage.dataDirectory());
-            createPrivateDirectory(data);
+            PrivateFiles.createDirectory(data);
         }
         Path staging = data.resolve("staging");
-        createPrivateDirectory(staging);
+        PrivateFiles.createDirectory(staging);
         clearStaleStagingFiles(staging);
         StoragePaths paths = new StoragePaths(data, staging, temporary);
         if (temporary) {
@@ -66,12 +64,7 @@ class StorageConfig {
         if (paths.temporary()) {
             config.setJdbcUrl("jdbc:h2:mem:docgen-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");
         } else {
-            Path database = paths.dataDirectory().resolve("docgen");
-            String location = database.toString();
-            if (location.indexOf(';') >= 0 || location.indexOf('?') >= 0) {
-                throw new IllegalStateException("The data directory path contains characters H2 cannot accept");
-            }
-            config.setJdbcUrl("jdbc:h2:file:" + location + ";DB_CLOSE_ON_EXIT=FALSE");
+            config.setJdbcUrl(LocalDatabase.jdbcUrl(paths.dataDirectory()));
         }
         config.setUsername("docgen");
         config.setPassword("");
@@ -97,24 +90,6 @@ class StorageConfig {
         return path;
     }
 
-    static void createPrivateDirectory(Path directory) throws IOException {
-        if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
-            if (posix()) {
-                Files.createDirectories(directory, PosixFilePermissions.asFileAttribute(OWNER_ONLY));
-            } else {
-                Files.createDirectories(directory);
-            }
-        }
-        BasicFileAttributes attributes = Files.readAttributes(
-                directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
-            throw new IllegalStateException("Storage paths must be real directories, not symbolic links");
-        }
-        if (posix()) {
-            Files.setPosixFilePermissions(directory, OWNER_ONLY);
-        }
-    }
-
     private static void clearStaleStagingFiles(Path staging) throws IOException {
         try (Stream<Path> entries = Files.list(staging)) {
             for (Path entry : entries.toList()) {
@@ -137,9 +112,5 @@ class StorageConfig {
         } catch (IOException ignored) {
             // Best effort on shutdown.
         }
-    }
-
-    private static boolean posix() {
-        return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     }
 }
