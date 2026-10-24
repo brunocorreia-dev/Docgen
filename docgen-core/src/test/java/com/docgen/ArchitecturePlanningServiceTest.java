@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,16 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArchitecturePlanningServiceTest {
     @Test
-    void plansWithTheStructuredModeOfALocalProviderWithoutAskingForConsent() throws Exception {
-        FakeProvider provider = new FakeProvider(false, PlanFixtures.validPlanJson());
-        ArchitecturePlanningService service = new ArchitecturePlanningService((name, model, allowRemote) -> provider);
+    void plansWithTheStructuredModeOfTheLocalProvider() throws Exception {
+        FakeProvider provider = new FakeProvider(PlanFixtures.validPlanJson());
+        ArchitecturePlanningService service = new ArchitecturePlanningService(model -> provider);
         ArchitecturePlanningService.Preparation preparation = service.prepare(PlanFixtures.brief(),
                 List.of(new SupportingDocument("spec.pdf", "Requisito: relatórios mensais", false)));
 
-        ArchitecturePlanningService.Result result = service.plan(preparation,
-                new ProviderSelection("ollama", null, false), transmission -> {
-                    throw new AssertionError("local providers must not ask for remote consent");
-                });
+        ArchitecturePlanningService.Result result = service.plan(preparation, new ProviderSelection(null));
 
         assertEquals(1, provider.structuredCalls);
         assertEquals(0, provider.documentationCalls);
@@ -32,77 +28,55 @@ class ArchitecturePlanningServiceTest {
     }
 
     @Test
-    void remoteProvidersRequireTheFlagAndExplicitConsentForTheExactPayload() throws Exception {
-        FakeProvider provider = new FakeProvider(true, PlanFixtures.validPlanJson());
-        ArchitecturePlanningService service = new ArchitecturePlanningService((name, model, allowRemote) -> provider);
-        ArchitecturePlanningService.Preparation preparation = service.prepare(PlanFixtures.brief(), List.of());
-
-        assertThrows(IllegalArgumentException.class, () -> service.plan(preparation,
-                new ProviderSelection("groq", null, false), transmission -> true));
-        assertThrows(DocumentationService.RemoteConsentDeniedException.class, () -> service.plan(preparation,
-                new ProviderSelection("groq", null, true), transmission -> false));
-        assertEquals(0, provider.structuredCalls);
-
-        AtomicReference<DocumentationService.RemoteTransmission> seen = new AtomicReference<>();
-        service.plan(preparation, new ProviderSelection("groq", null, true), transmission -> {
-            seen.set(transmission);
-            return true;
-        });
-        assertEquals("fake remote", seen.get().destination());
-        assertEquals(preparation.characterCount(), seen.get().totalCharacters());
-        assertEquals(1, provider.structuredCalls);
-    }
-
-    @Test
     void invalidModelOutputFailsInsteadOfProducingAPlan() {
-        FakeProvider provider = new FakeProvider(false, "Sure! Here is your architecture: microservices.");
-        ArchitecturePlanningService service = new ArchitecturePlanningService((name, model, allowRemote) -> provider);
+        FakeProvider provider = new FakeProvider("Sure! Here is your architecture: microservices.");
+        ArchitecturePlanningService service = new ArchitecturePlanningService(model -> provider);
 
         assertThrows(ArchitecturePlanParser.InvalidPlanException.class, () -> service.plan(
                 service.prepare(PlanFixtures.brief(), List.of()),
-                new ProviderSelection("ollama", null, false), transmission -> true));
+                new ProviderSelection(null)));
     }
 
     @Test
     void providerFailuresPropagate() {
-        ArchitecturePlanningService service = new ArchitecturePlanningService((name, model, allowRemote) ->
-                new FakeProvider(false, (String) null));
+        ArchitecturePlanningService service = new ArchitecturePlanningService(model ->
+                new FakeProvider((String) null));
 
         assertThrows(java.io.IOException.class, () -> service.plan(
                 service.prepare(PlanFixtures.brief(), List.of()),
-                new ProviderSelection("ollama", null, false), transmission -> true));
+                new ProviderSelection(null)));
     }
 
     @Test
-    void digestsBindTheProviderModelAndPrompt() {
-        ArchitecturePlanningService service = new ArchitecturePlanningService((name, model, allowRemote) -> null);
-        ArchitecturePlanningService.Preparation preparation = service.prepare(PlanFixtures.brief(), List.of());
-        ProviderSelection groq = new ProviderSelection("groq", null, true);
+    void plansWithTheSelectedModel() throws Exception {
+        FakeProvider provider = new FakeProvider(PlanFixtures.validPlanJson());
+        List<String> models = new ArrayList<>();
+        ArchitecturePlanningService service = new ArchitecturePlanningService(model -> {
+            models.add(model);
+            return provider;
+        });
 
-        assertEquals(preparation.digest(groq), service.prepare(PlanFixtures.brief(), List.of()).digest(groq));
-        assertTrue(!preparation.digest(groq).equals(preparation.digest(new ProviderSelection("groq", "other", true))));
-        assertTrue(!preparation.digest(groq).equals(service.prepare(PlanFixtures.brief(),
-                List.of(new SupportingDocument("a.pdf", "changed", false))).digest(groq)));
+        service.plan(service.prepare(PlanFixtures.brief(), List.of()), new ProviderSelection("qwen2.5-coder:7b"));
+
+        assertEquals(List.of("qwen2.5-coder:7b"), models);
     }
 
     @Test
-    void providerSelectionRejectsUnknownProvidersAndUnsafeModelNames() {
-        assertThrows(IllegalArgumentException.class, () -> new ProviderSelection("openai", null, false));
-        assertThrows(IllegalArgumentException.class, () -> new ProviderSelection("ollama", "llama\n3", false));
-        assertThrows(IllegalArgumentException.class, () -> new ProviderSelection("ollama", "../x", false));
-        assertEquals("groq", new ProviderSelection(null, null, false).provider());
-        assertEquals("llama3.2:3b", new ProviderSelection("OLLAMA", "llama3.2:3b", false).model());
+    void providerSelectionIsAlwaysOllamaAndRejectsUnsafeModelNames() {
+        assertThrows(IllegalArgumentException.class, () -> new ProviderSelection("llama\n3"));
+        assertThrows(IllegalArgumentException.class, () -> new ProviderSelection("../x"));
+        assertEquals("ollama", new ProviderSelection(null).provider());
+        assertEquals(null, new ProviderSelection("  ").model());
+        assertEquals("qwen2.5-coder:7b", new ProviderSelection(" qwen2.5-coder:7b ").model());
     }
 
     static final class FakeProvider implements LLMProvider {
-        private final boolean remote;
         private final List<String> responses;
         final List<String> prompts = new ArrayList<>();
         int structuredCalls;
         int documentationCalls;
 
-        FakeProvider(boolean remote, String... responses) {
-            this.remote = remote;
+        FakeProvider(String... responses) {
             this.responses = new ArrayList<>(java.util.Arrays.asList(responses));
         }
 
@@ -125,16 +99,6 @@ class ArchitecturePlanningServiceTest {
                 throw new java.io.IOException("provider unavailable");
             }
             return response;
-        }
-
-        @Override
-        public boolean isRemote() {
-            return remote;
-        }
-
-        @Override
-        public String describeDestination() {
-            return remote ? "fake remote" : "fake local";
         }
     }
 }

@@ -45,16 +45,6 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     @Override
-    public boolean isRemote() {
-        return false;
-    }
-
-    @Override
-    public String describeDestination() {
-        return "Ollama at " + GENERATE_URL + " (local service; model " + model + ")";
-    }
-
-    @Override
     public String generateDocumentation(String prompt) throws Exception {
         return generate(buildRequestBody(prompt, false));
     }

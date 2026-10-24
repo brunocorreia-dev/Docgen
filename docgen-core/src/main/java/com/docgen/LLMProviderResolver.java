@@ -1,7 +1,10 @@
 package com.docgen;
 
-/** Creates a provider client for a selection; the default is {@link LLMProviderFactory#create}. */
+/**
+ * Creates a provider client for a model ({@code null} selects the default);
+ * the default is {@link LLMProviderFactory#create}.
+ */
 @FunctionalInterface
 public interface LLMProviderResolver {
-    LLMProvider create(String provider, String model, boolean allowRemote);
+    LLMProvider create(String model);
 }

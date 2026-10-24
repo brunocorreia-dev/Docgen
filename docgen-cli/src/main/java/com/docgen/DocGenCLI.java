@@ -5,10 +5,8 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-import java.io.Console;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.Callable;
 
 @Command(name = "docgen", mixinStandardHelpOptions = true, version = "docgen 2.0.0",
@@ -25,14 +23,12 @@ public final class DocGenCLI implements Callable<Integer> {
     @Option(names = {"-o", "--output"}, defaultValue = ".", description = "Output directory. Defaults to the current directory.")
     private Path output;
 
-    @Option(names = "--provider", defaultValue = "groq", description = "LLM provider: groq or ollama. Default: ${DEFAULT-VALUE}.")
+    @Option(names = "--provider", defaultValue = "ollama",
+            description = "LLM provider. Only ollama (the local Ollama service) is supported; kept for script compatibility.")
     private String provider;
 
-    @Option(names = "--model", description = "Provider model. Defaults: Groq llama-3.3-70b-versatile, Ollama llama3.2.")
+    @Option(names = "--model", description = "Ollama model. Default: " + LLMProviderFactory.DEFAULT_MODEL + ".")
     private String model;
-
-    @Option(names = "--allow-remote", description = "Required when using Groq because repository content is sent to a remote API.")
-    private boolean allowRemote;
 
     @Option(names = "--force", description = "Overwrite existing documentation or prompt-preview files.")
     private boolean force;
@@ -47,11 +43,8 @@ public final class DocGenCLI implements Callable<Integer> {
             description = "Comma-separated allowlist of file extensions to include (e.g. java,md,xml). Narrows the built-in supported set; sensitive-file and .docgenignore exclusions still apply.")
     private List<String> includeExtensions;
 
-    @Option(names = {"-y", "--yes"}, description = "Skip the interactive confirmation shown before sending content to a remote provider.")
-    private boolean assumeYes;
-
     public DocGenCLI() {
-        this(new DocumentationService());
+        this.documentationService = new DocumentationService(this::localProvider);
     }
 
     DocGenCLI(DocumentationService documentationService) {
@@ -75,18 +68,12 @@ public final class DocGenCLI implements Callable<Integer> {
                     repository,
                     output,
                     operation,
-                    provider,
                     model,
                     includeExtensions,
-                    allowRemote,
                     !dryRun,
                     force
             );
-            DocumentationResult result = documentationService.execute(
-                    request,
-                    this::confirmRemoteSend,
-                    new CliProgressListener()
-            );
+            DocumentationResult result = documentationService.execute(request, new CliProgressListener());
 
             if (dryRun) {
                 printDryRun(result.analysis());
@@ -97,13 +84,19 @@ public final class DocGenCLI implements Callable<Integer> {
                         + SafeText.forTerminal(output.toAbsolutePath().normalize().toString()));
             }
             return 0;
-        } catch (DocumentationService.RemoteConsentDeniedException denied) {
-            System.err.println("Aborted: no repository content was sent.");
-            return 1;
         } catch (Exception e) {
             System.err.println("Error: " + safeFailureMessage(e));
             return 1;
         }
+    }
+
+    /** Resolved only when generation starts, after the output preflight, like any provider failure. */
+    private LLMProvider localProvider(String selectedModel) {
+        if (provider == null || !ProviderSelection.PROVIDER.equalsIgnoreCase(provider.strip())) {
+            throw new IllegalArgumentException("Unsupported provider: " + provider
+                    + ". DocGen runs only on the local Ollama service (--provider ollama).");
+        }
+        return LLMProviderFactory.create(selectedModel);
     }
 
     static String safeFailureMessage(Throwable failure) {
@@ -127,7 +120,7 @@ public final class DocGenCLI implements Callable<Integer> {
         System.out.println();
         System.out.println("Dry run: showing the selection only. No provider was contacted and no content leaves this machine.");
         System.out.println();
-        System.out.println("Included files (content would be redacted, then sent to the selected provider):");
+        System.out.println("Included files (content would be redacted, then sent to the local Ollama model):");
         if (analysis.includedFiles().isEmpty()) {
             System.out.println("  (none)");
         }
@@ -157,36 +150,6 @@ public final class DocGenCLI implements Callable<Integer> {
         System.out.println("  " + SafeText.forTerminal(readmePreview.toString()));
         System.out.println("  " + SafeText.forTerminal(architecturePreview.toString()));
         System.out.println("Review them to see exactly what a real run would send.");
-    }
-
-    /**
-     * Prints what is about to leave the machine and, when running on an
-     * interactive console without --yes, requires an explicit confirmation.
-     * Non-interactive runs require --yes as the explicit second consent signal.
-     */
-    private boolean confirmRemoteSend(DocumentationService.RemoteTransmission transmission) {
-        System.err.println();
-        System.err.println("WARNING: about to send data to "
-                + SafeText.forTerminal(transmission.destination()) + ".");
-        System.err.println("Data that leaves this machine: redacted content of " + transmission.fileCount()
-                + " files (" + transmission.totalCharacters()
-                + " chars), all included file paths, and the names of size-skipped files.");
-        System.err.println("A normal run sends two prompts (README and architecture); Groq may make up to three attempts for each prompt after rate-limit or server errors.");
-        System.err.println("Secret redaction is best-effort. Use --dry-run or --preview-prompt to inspect first.");
-        if (assumeYes) {
-            return true;
-        }
-        Console console = System.console();
-        if (console == null) {
-            System.err.println("Aborted: no interactive console is available. Re-run with both --allow-remote and --yes to consent non-interactively.");
-            return false;
-        }
-        String answer = console.readLine("Continue? [y/N] ");
-        if (answer == null) {
-            return false;
-        }
-        String normalized = answer.trim().toLowerCase(Locale.ROOT);
-        return normalized.equals("y") || normalized.equals("yes");
     }
 
     private final class CliProgressListener implements DocumentationService.ProgressListener {

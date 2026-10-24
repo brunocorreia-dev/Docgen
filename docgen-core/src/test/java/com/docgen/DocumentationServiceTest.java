@@ -27,7 +27,7 @@ class DocumentationServiceTest {
         Files.writeString(repository.resolve("App.java"), "class App {}");
 
         DocumentationResult result = service(failingProviderResolver()).execute(request(
-                DocumentationRequest.Operation.ANALYZE, List.of(), false, false));
+                DocumentationRequest.Operation.ANALYZE, List.of(), false));
 
         assertEquals(List.of("App.java"), result.analysis().includedFiles().stream()
                 .map(DocumentationResult.SelectedFile::relativePath).toList());
@@ -44,9 +44,9 @@ class DocumentationServiceTest {
         DocumentationService service = service(failingProviderResolver());
 
         DocumentationResult analysis = service.execute(request(
-                DocumentationRequest.Operation.ANALYZE, List.of(), false, false));
+                DocumentationRequest.Operation.ANALYZE, List.of(), false));
         IOException error = assertThrows(IOException.class, () -> service.execute(request(
-                DocumentationRequest.Operation.GENERATE, List.of(), false, false)));
+                DocumentationRequest.Operation.GENERATE, List.of(), false)));
 
         assertTrue(analysis.analysis().includedFiles().isEmpty());
         assertTrue(error.getMessage().contains("no files matched"));
@@ -58,7 +58,7 @@ class DocumentationServiceTest {
         Files.writeString(repository.resolve("notes.md"), "notes");
 
         DocumentationResult result = service(failingProviderResolver()).execute(request(
-                DocumentationRequest.Operation.ANALYZE, List.of("md"), false, false));
+                DocumentationRequest.Operation.ANALYZE, List.of("md"), false));
 
         assertEquals(List.of("notes.md"), result.analysis().includedFiles().stream()
                 .map(DocumentationResult.SelectedFile::relativePath).toList());
@@ -73,7 +73,7 @@ class DocumentationServiceTest {
         }, failingProviderResolver());
 
         IOException actual = assertThrows(IOException.class, () -> service.execute(request(
-                DocumentationRequest.Operation.ANALYZE, List.of(), false, false)));
+                DocumentationRequest.Operation.ANALYZE, List.of(), false)));
 
         assertEquals(expected, actual);
     }
@@ -82,10 +82,10 @@ class DocumentationServiceTest {
     void generatesAndReturnsValidatedDocumentationWithASimulatedProvider() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();
-        LLMProvider provider = provider(false, calls, "# Readme\n\nText", "# Architecture\n\nText");
+        LLMProvider provider = provider(calls, "# Readme\n\nText", "# Architecture\n\nText");
 
-        DocumentationResult result = service((name, model, remote) -> provider).execute(request(
-                DocumentationRequest.Operation.GENERATE, List.of(), false, false));
+        DocumentationResult result = service(model -> provider).execute(request(
+                DocumentationRequest.Operation.GENERATE, List.of(), false));
 
         assertEquals(2, calls.get());
         assertEquals("# Readme\n\nText\n", result.readme());
@@ -97,10 +97,10 @@ class DocumentationServiceTest {
     void persistsTheValidatedPairWhenRequested() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();
-        LLMProvider provider = provider(false, calls, "# Readme\n\nText", "# Architecture\n\nText");
+        LLMProvider provider = provider(calls, "# Readme\n\nText", "# Architecture\n\nText");
 
-        DocumentationResult result = service((name, model, remote) -> provider).execute(request(
-                DocumentationRequest.Operation.GENERATE, List.of(), true, false));
+        DocumentationResult result = service(model -> provider).execute(request(
+                DocumentationRequest.Operation.GENERATE, List.of(), true));
 
         assertTrue(result.persisted());
         assertEquals(result.readme(), Files.readString(output.resolve("README.md")));
@@ -111,10 +111,10 @@ class DocumentationServiceTest {
     void validatesBothResponsesBeforePublishingEitherDocument() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();
-        LLMProvider provider = provider(false, calls, "# Readme\n\nValid", "<script>invalid</script>");
+        LLMProvider provider = provider(calls, "# Readme\n\nValid", "<script>invalid</script>");
 
-        assertThrows(IOException.class, () -> service((name, model, remote) -> provider).execute(request(
-                DocumentationRequest.Operation.GENERATE, List.of(), true, false)));
+        assertThrows(IOException.class, () -> service(model -> provider).execute(request(
+                DocumentationRequest.Operation.GENERATE, List.of(), true)));
 
         assertEquals(2, calls.get());
         assertFalse(Files.exists(output.resolve("README.md")));
@@ -125,28 +125,15 @@ class DocumentationServiceTest {
     void providerFailureDoesNotPublishAPartialDocumentationPair() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();
-        LLMProvider provider = new LLMProvider() {
-            @Override
-            public String generateDocumentation(String prompt) throws Exception {
-                if (calls.getAndIncrement() == 0) {
-                    return "# Readme\n\nValid";
-                }
-                throw new IOException("provider failed");
+        LLMProvider provider = prompt -> {
+            if (calls.getAndIncrement() == 0) {
+                return "# Readme\n\nValid";
             }
-
-            @Override
-            public boolean isRemote() {
-                return false;
-            }
-
-            @Override
-            public String describeDestination() {
-                return "simulated local provider";
-            }
+            throw new IOException("provider failed");
         };
 
-        assertThrows(IOException.class, () -> service((name, model, remote) -> provider).execute(request(
-                DocumentationRequest.Operation.GENERATE, List.of(), true, false)));
+        assertThrows(IOException.class, () -> service(model -> provider).execute(request(
+                DocumentationRequest.Operation.GENERATE, List.of(), true)));
 
         assertEquals(2, calls.get());
         assertFalse(Files.exists(output.resolve("README.md")));
@@ -157,14 +144,14 @@ class DocumentationServiceTest {
     void analysisAndPromptPreviewNeverResolveOrCallAProvider() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger resolutions = new AtomicInteger();
-        DocumentationService service = service((name, model, remote) -> {
+        DocumentationService service = service(model -> {
             resolutions.incrementAndGet();
             throw new AssertionError("provider must not be resolved");
         });
 
-        service.execute(request(DocumentationRequest.Operation.ANALYZE, List.of(), false, false));
+        service.execute(request(DocumentationRequest.Operation.ANALYZE, List.of(), false));
         DocumentationResult preview = service.execute(request(
-                DocumentationRequest.Operation.PREVIEW_PROMPTS, List.of(), false, false));
+                DocumentationRequest.Operation.PREVIEW_PROMPTS, List.of(), false));
 
         assertEquals(0, resolutions.get());
         assertTrue(preview.readmePrompt().contains("<repository_snapshot>"));
@@ -172,50 +159,38 @@ class DocumentationServiceTest {
     }
 
     @Test
-    void remoteGenerationRequiresBothExplicitPermissionAndInterfaceConsent() throws Exception {
+    void passesTheRequestedModelToTheLocalProvider() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();
-        AtomicInteger consentChecks = new AtomicInteger();
-        LLMProvider remoteProvider = provider(true, calls, "# Readme", "# Architecture");
-        DocumentationService service = service((name, model, remote) -> remoteProvider);
+        List<String> models = new java.util.ArrayList<>();
+        LLMProvider provider = provider(calls, "# Readme\n\nText", "# Architecture\n\nText");
+        DocumentationService service = service(model -> {
+            models.add(model);
+            return provider;
+        });
 
-        assertThrows(IllegalArgumentException.class, () -> service.execute(
-                request(DocumentationRequest.Operation.GENERATE, List.of(), false, false),
-                transmission -> {
-                    consentChecks.incrementAndGet();
-                    return true;
-                },
-                DocumentationService.ProgressListener.NONE));
-        assertThrows(DocumentationService.RemoteConsentDeniedException.class, () -> service.execute(
-                request(DocumentationRequest.Operation.GENERATE, List.of(), false, true),
-                transmission -> {
-                    consentChecks.incrementAndGet();
-                    return false;
-                },
-                DocumentationService.ProgressListener.NONE));
+        service.execute(new DocumentationRequest(repository, output, DocumentationRequest.Operation.GENERATE,
+                "qwen2.5-coder:7b", List.of(), false, false));
 
-        assertEquals(1, consentChecks.get(), "--allow-remote remains separate from UI confirmation");
-        assertEquals(0, calls.get());
+        assertEquals(List.of("qwen2.5-coder:7b"), models);
+        assertEquals(2, calls.get());
     }
 
     private DocumentationRequest request(
             DocumentationRequest.Operation operation,
             List<String> extensions,
-            boolean persist,
-            boolean allowRemote
+            boolean persist
     ) {
-        return new DocumentationRequest(
-                repository, output, operation, "ollama", null, extensions,
-                allowRemote, persist, false);
+        return new DocumentationRequest(repository, output, operation, null, extensions, persist, false);
     }
 
-    private static DocumentationService service(DocumentationService.ProviderResolver resolver) {
+    private static DocumentationService service(LLMProviderResolver resolver) {
         return service((path, options) -> new RepoScanner().scan(path, options), resolver);
     }
 
     private static DocumentationService service(
             DocumentationService.RepositoryReader reader,
-            DocumentationService.ProviderResolver resolver
+            LLMProviderResolver resolver
     ) {
         OutputWriter outputWriter = new OutputWriter();
         PromptPreviewWriter previewWriter = new PromptPreviewWriter();
@@ -250,33 +225,13 @@ class DocumentationServiceTest {
         );
     }
 
-    private static DocumentationService.ProviderResolver failingProviderResolver() {
-        return (name, model, remote) -> {
+    private static LLMProviderResolver failingProviderResolver() {
+        return model -> {
             throw new AssertionError("provider must not be resolved");
         };
     }
 
-    private static LLMProvider provider(
-            boolean remote,
-            AtomicInteger calls,
-            String firstResponse,
-            String secondResponse
-    ) {
-        return new LLMProvider() {
-            @Override
-            public String generateDocumentation(String prompt) {
-                return calls.getAndIncrement() == 0 ? firstResponse : secondResponse;
-            }
-
-            @Override
-            public boolean isRemote() {
-                return remote;
-            }
-
-            @Override
-            public String describeDestination() {
-                return remote ? "simulated remote provider" : "simulated local provider";
-            }
-        };
+    private static LLMProvider provider(AtomicInteger calls, String firstResponse, String secondResponse) {
+        return prompt -> calls.getAndIncrement() == 0 ? firstResponse : secondResponse;
     }
 }

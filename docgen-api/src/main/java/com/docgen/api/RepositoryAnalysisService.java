@@ -31,9 +31,7 @@ final class RepositoryAnalysisService {
                 null,
                 DocumentationRequest.Operation.ANALYZE,
                 null,
-                null,
                 includeExtensions,
-                false,
                 false,
                 false
         );

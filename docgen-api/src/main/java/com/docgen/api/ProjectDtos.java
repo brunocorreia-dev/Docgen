@@ -9,7 +9,7 @@ import java.util.List;
 
 /** HTTP contracts for projects. Mapped to/from {@link com.docgen.ProjectBrief} by {@link ProjectService}. */
 final class ProjectDtos {
-    static final String PROVIDER = "groq|ollama";
+    static final String PROVIDER = "ollama";
     static final String MODEL = "[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}";
     static final String LANGUAGE = "pt-BR|en";
 

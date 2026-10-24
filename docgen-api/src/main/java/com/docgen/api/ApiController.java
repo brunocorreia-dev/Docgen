@@ -1,6 +1,5 @@
 package com.docgen.api;
 
-import com.docgen.LLMProviderFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,27 +15,14 @@ import java.util.List;
 @RequestMapping("/api/v1")
 public class ApiController {
     private final RepositoryAnalysisService analysisService;
-    private final boolean remoteEnabled;
 
-    ApiController(RepositoryAnalysisService analysisService, DocGenApiProperties properties) {
+    ApiController(RepositoryAnalysisService analysisService) {
         this.analysisService = analysisService;
-        this.remoteEnabled = properties.remote().enabled();
     }
 
     @GetMapping("/health")
     public ApiDtos.HealthResponse health() {
         return new ApiDtos.HealthResponse("available");
-    }
-
-    @GetMapping("/providers")
-    public ApiDtos.ProviderResponse providers() {
-        List<ApiDtos.ProviderItem> providers = LLMProviderFactory.supportedProviders().stream()
-                .map(provider -> new ApiDtos.ProviderItem(provider.id(), provider.remote(), provider.defaultModel(),
-                        !provider.remote() || remoteEnabled,
-                        !provider.remote() || ProviderConfig.groqKeyConfigured(),
-                        provider.remote()))
-                .toList();
-        return new ApiDtos.ProviderResponse(providers);
     }
 
     @PostMapping("/repositories/{repositoryId}/analysis")

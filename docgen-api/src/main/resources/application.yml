@@ -40,9 +40,6 @@ docgen:
   storage:
     data-directory: ${DOCGEN_DATA_DIR:}
     in-memory: false
-  remote:
-    # Operator gate for remote providers (Groq). Users must still consent per operation.
-    enabled: ${DOCGEN_ALLOW_REMOTE:false}
   jobs:
     workers: ${DOCGEN_JOB_WORKERS:2}
     queue-capacity: 16
@@ -57,4 +54,3 @@ docgen:
   auth:
     token-ttl: 8h
     idle-timeout: 30m
-    consent-ttl: 10m

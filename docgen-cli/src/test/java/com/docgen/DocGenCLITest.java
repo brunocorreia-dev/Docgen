@@ -11,6 +11,9 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,39 +79,49 @@ class DocGenCLITest {
     }
 
     @Test
-    void remoteProviderStillRequiresAllowRemote() throws Exception {
+    void generatesReadmeAndArchitectureWithTheLocalProvider() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
+        List<String> models = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        DocumentationService service = new DocumentationService(model -> {
+            models.add(model);
+            return prompt -> calls.getAndIncrement() == 0 ? "# App\n\nReadme." : "# Architecture\n\nLayers.";
+        });
 
-        int exitCode = new CommandLine(new DocGenCLI())
-                .execute("-o", out.toString(), repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI(service))
+                .execute("--model", "qwen2.5-coder:7b", "-o", out.toString(), repo.toString());
 
-        assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
-        assertFalse(Files.exists(repo.resolve("ARCHITECTURE.md")), "nothing must be generated without consent");
+        assertEquals(0, exitCode, () -> "stderr: " + stderr.toString(StandardCharsets.UTF_8));
+        assertEquals("# App\n\nReadme.\n", Files.readString(out.resolve("README.md")));
+        assertEquals("# Architecture\n\nLayers.\n", Files.readString(out.resolve("ARCHITECTURE.md")));
+        assertEquals(List.of("qwen2.5-coder:7b"), models);
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("Documentation written to:"));
     }
 
     @Test
-    void yesNeverReplacesTheAllowRemoteBoundary() throws Exception {
+    void rejectsEveryProviderOtherThanTheLocalOllama() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 
         int exitCode = new CommandLine(new DocGenCLI())
-                .execute("--yes", "-o", out.toString(), repo.toString());
+                .execute("--provider", "remote-cloud", "-o", out.toString(), repo.toString());
 
         assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--allow-remote"));
-        assertFalse(Files.exists(repo.resolve("README.md")));
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("runs only on the local Ollama service"));
+        assertFalse(Files.exists(out.resolve("README.md")));
+        assertFalse(Files.exists(out.resolve("ARCHITECTURE.md")));
     }
 
     @Test
-    void nonInteractiveRemoteRunRequiresExplicitYes() throws Exception {
+    void remoteTransmissionOptionsNoLongerExist() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 
-        int exitCode = new CommandLine(new DocGenCLI())
-                .execute("--allow-remote", "-o", out.toString(), repo.toString());
+        for (String option : List.of("--allow-remote", "--yes", "-y")) {
+            stderr.reset();
+            int exitCode = new CommandLine(new DocGenCLI()).execute(option, "--dry-run", repo.toString());
 
-        assertEquals(1, exitCode);
-        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--yes"));
-        assertFalse(Files.exists(repo.resolve("README.md")), "no provider may be contacted without explicit non-interactive consent");
+            assertEquals(2, exitCode, option);
+            assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("Unknown option"), option);
+        }
     }
 
     @Test
@@ -129,7 +142,7 @@ class DocGenCLITest {
     void refusesToRunWhenSelectionIsEmpty() throws Exception {
         Files.writeString(repo.resolve("binary.bin"), "data");
 
-        int exitCode = new CommandLine(new DocGenCLI()).execute("--allow-remote", repo.toString());
+        int exitCode = new CommandLine(new DocGenCLI()).execute(repo.toString());
 
         assertEquals(1, exitCode);
         assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("no files matched"));

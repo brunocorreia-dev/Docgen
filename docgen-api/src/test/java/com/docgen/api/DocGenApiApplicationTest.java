@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -49,15 +48,6 @@ class DocGenApiApplicationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value("available"));
-    }
-
-    @Test
-    void listsStaticProviderMetadataWithoutAuthentication() throws Exception {
-        mockMvc.perform(get("/api/v1/providers"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.providers[*].id", containsInAnyOrder("groq", "ollama")))
-                .andExpect(jsonPath("$.providers[?(@.id == 'groq')].remote").value(true))
-                .andExpect(jsonPath("$.providers[?(@.id == 'ollama')].remote").value(false));
     }
 
     @Test

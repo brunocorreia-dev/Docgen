@@ -19,14 +19,13 @@ class ProjectDocumentationServiceTest {
     @Test
     void generatesValidatedReadmeArchitectureAndDiagramFromAnApprovedPlan() throws Exception {
         ArchitecturePlanningServiceTest.FakeProvider provider = new ArchitecturePlanningServiceTest.FakeProvider(
-                false, "# Inventory API\n\nProjeto em planejamento.", "# Arquitetura\n\nProposta.");
-        ProjectDocumentationService service = new ProjectDocumentationService((name, model, allowRemote) -> provider);
+                "# Inventory API\n\nProjeto em planejamento.", "# Arquitetura\n\nProposta.");
+        ProjectDocumentationService service = new ProjectDocumentationService(model -> provider);
         List<DocumentationService.Artifact> progress = new ArrayList<>();
 
         ProjectDocumentationService.Result result = service.generate(
                 service.prepare(PlanFixtures.brief(), plan()),
-                new ProviderSelection("ollama", null, false),
-                transmission -> true,
+                new ProviderSelection(null),
                 new DocumentationService.ProgressListener() {
                     @Override
                     public void generationStarted(DocumentationService.Artifact artifact) {
@@ -44,36 +43,24 @@ class ProjectDocumentationServiceTest {
 
     @Test
     void activeMarkdownFromTheModelIsRejected() throws Exception {
-        ProjectDocumentationService service = new ProjectDocumentationService((name, model, allowRemote) ->
-                new ArchitecturePlanningServiceTest.FakeProvider(false, "# Hi\n\n<script>alert(1)</script>"));
+        ProjectDocumentationService service = new ProjectDocumentationService(model ->
+                new ArchitecturePlanningServiceTest.FakeProvider("# Hi\n\n<script>alert(1)</script>"));
 
         assertThrows(UnsafeOutputException.class, () -> service.generate(service.prepare(PlanFixtures.brief(), plan()),
-                new ProviderSelection("ollama", null, false), transmission -> true,
+                new ProviderSelection(null),
                 DocumentationService.ProgressListener.NONE));
     }
 
     @Test
     void secretsInModelOutputAreRedacted() throws Exception {
-        ProjectDocumentationService service = new ProjectDocumentationService((name, model, allowRemote) ->
-                new ArchitecturePlanningServiceTest.FakeProvider(false,
+        ProjectDocumentationService service = new ProjectDocumentationService(model ->
+                new ArchitecturePlanningServiceTest.FakeProvider(
                         "# Hi\n\nkey gsk_abcdefghijklmnopqrstuvwxyz123456"));
 
         ProjectDocumentationService.Result result = service.generate(service.prepare(PlanFixtures.brief(), plan()),
-                new ProviderSelection("ollama", null, false), transmission -> true,
+                new ProviderSelection(null),
                 DocumentationService.ProgressListener.NONE);
 
         assertFalse(result.readme().contains("gsk_abcdefghijklmnopqrstuvwxyz123456"));
-    }
-
-    @Test
-    void remoteDocumentationGenerationNeedsConsent() throws Exception {
-        ArchitecturePlanningServiceTest.FakeProvider provider = new ArchitecturePlanningServiceTest.FakeProvider(
-                true, "# Hi");
-        ProjectDocumentationService service = new ProjectDocumentationService((name, model, allowRemote) -> provider);
-
-        assertThrows(DocumentationService.RemoteConsentDeniedException.class, () -> service.generate(
-                service.prepare(PlanFixtures.brief(), plan()), new ProviderSelection("groq", null, true),
-                transmission -> false, DocumentationService.ProgressListener.NONE));
-        assertEquals(0, provider.documentationCalls);
     }
 }

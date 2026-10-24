@@ -8,15 +8,19 @@ import java.util.Objects;
 public final class DocumentationService {
     private final RepositoryReader repositoryReader;
     private final PromptBuilder promptBuilder;
-    private final ProviderResolver providerResolver;
+    private final LLMProviderResolver providerResolver;
     private final DocumentStore documentStore;
     private final PromptStore promptStore;
 
     public DocumentationService() {
+        this(LLMProviderFactory::create);
+    }
+
+    public DocumentationService(LLMProviderResolver providerResolver) {
         this(
                 (repository, options) -> new RepoScanner().scan(repository, options),
                 new PromptBuilder(),
-                LLMProviderFactory::create,
+                providerResolver,
                 new DocumentStore() {
                     private final OutputWriter writer = new OutputWriter();
 
@@ -51,7 +55,7 @@ public final class DocumentationService {
     DocumentationService(
             RepositoryReader repositoryReader,
             PromptBuilder promptBuilder,
-            ProviderResolver providerResolver,
+            LLMProviderResolver providerResolver,
             DocumentStore documentStore,
             PromptStore promptStore
     ) {
@@ -63,16 +67,12 @@ public final class DocumentationService {
     }
 
     public DocumentationResult execute(DocumentationRequest request) throws Exception {
-        return execute(request, transmission -> false, ProgressListener.NONE);
+        return execute(request, ProgressListener.NONE);
     }
 
-    public DocumentationResult execute(
-            DocumentationRequest request,
-            RemoteConsent remoteConsent,
-            ProgressListener progressListener
-    ) throws Exception {
+    public DocumentationResult execute(DocumentationRequest request, ProgressListener progressListener)
+            throws Exception {
         Objects.requireNonNull(request, "request");
-        Objects.requireNonNull(remoteConsent, "remoteConsent");
         Objects.requireNonNull(progressListener, "progressListener");
 
         RepoScanner.Options scanOptions = RepoScanner.Options.withAllowedExtensions(request.includeExtensions());
@@ -104,19 +104,7 @@ public final class DocumentationService {
                     null, null, request.persist());
         }
 
-        LLMProvider provider = providerResolver.create(
-                request.provider(), request.model(), request.allowRemote());
-        if (provider.isRemote()) {
-            if (!request.allowRemote()) {
-                throw new IllegalArgumentException(
-                        "Groq sends repository content to a remote service. Re-run with --allow-remote if you consent.");
-            }
-            RemoteTransmission transmission = new RemoteTransmission(
-                    provider.describeDestination(), analysis.includedFiles().size(), analysis.totalCharacters());
-            if (!remoteConsent.authorize(transmission)) {
-                throw new RemoteConsentDeniedException();
-            }
-        }
+        LLMProvider provider = providerResolver.create(request.model());
 
         progressListener.generationStarted(Artifact.README);
         String readme = DocumentationValidator.redactAndValidate(
@@ -169,17 +157,6 @@ public final class DocumentationService {
         ARCHITECTURE
     }
 
-    public record RemoteTransmission(String destination, int fileCount, int totalCharacters) {
-        public RemoteTransmission {
-            Objects.requireNonNull(destination, "destination");
-        }
-    }
-
-    @FunctionalInterface
-    public interface RemoteConsent {
-        boolean authorize(RemoteTransmission transmission);
-    }
-
     public interface ProgressListener {
         ProgressListener NONE = new ProgressListener() {
         };
@@ -191,20 +168,9 @@ public final class DocumentationService {
         }
     }
 
-    public static final class RemoteConsentDeniedException extends Exception {
-        public RemoteConsentDeniedException() {
-            super("Remote transmission was not authorized.");
-        }
-    }
-
     @FunctionalInterface
     interface RepositoryReader {
         RepoContext scan(Path repository, RepoScanner.Options options) throws IOException;
-    }
-
-    @FunctionalInterface
-    interface ProviderResolver {
-        LLMProvider create(String provider, String model, boolean allowRemote);
     }
 
     interface DocumentStore {

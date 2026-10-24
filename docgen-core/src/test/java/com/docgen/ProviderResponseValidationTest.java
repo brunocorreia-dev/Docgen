@@ -21,32 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProviderResponseValidationTest {
     @Test
-    void groqAcceptsOnlyAStoppedCompletion() throws Exception {
-        String body = """
-                {"choices":[{"finish_reason":"stop","message":{"content":"# Project\\nText"}}]}
-                """;
-
-        assertEquals("# Project\nText", GroqProvider.parseContent(body));
-
-        IOException truncated = assertThrows(IOException.class, () -> GroqProvider.parseContent(
-                "{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"# Partial\"}}]}"));
-        assertTrue(truncated.getMessage().contains("incomplete"));
-    }
-
-    @Test
-    void groqRejectsMissingOrMalformedCompletionMetadata() {
-        assertThrows(IOException.class, () -> GroqProvider.parseContent("{}"));
-        assertThrows(IOException.class, () -> GroqProvider.parseContent("null"));
-        assertThrows(IOException.class, () -> GroqProvider.parseContent(
-                "{\"choices\":[{\"message\":{\"content\":\"# Project\"}}]}"));
-
-        IOException malformed = assertThrows(IOException.class,
-                () -> GroqProvider.parseContent("{\"echoed_secret\":\"gsk_abcdefghijklmnopqrstuvwxyz123456\""));
-        assertEquals("Groq returned an invalid JSON response.", malformed.getMessage());
-        assertEquals(null, malformed.getCause(), "raw remote bodies must not survive in exception causes");
-    }
-
-    @Test
     void boundsSuccessfulResponseBytesBeforeMaterializingTheBody() throws Exception {
         HttpResponse.BodySubscriber<String> accepted = BoundedUtf8BodySubscriber.of(5, "Provider");
         TestSubscription acceptedSubscription = new TestSubscription();
@@ -89,7 +63,7 @@ class ProviderResponseValidationTest {
     }
 
     @Test
-    void ollamaDoesNotEchoRemoteControlledErrorText() {
+    void ollamaDoesNotEchoProviderControlledErrorText() {
         IOException error = assertThrows(IOException.class,
                 () -> OllamaProvider.parseStreamingResponse(Stream.of(
                         "{\"error\":\"bad\\u001b[31m\\nsecret\",\"done\":true}")));

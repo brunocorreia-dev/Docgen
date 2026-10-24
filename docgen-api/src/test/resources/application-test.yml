@@ -7,8 +7,6 @@ docgen:
   repositories: {}
   storage:
     in-memory: true
-  remote:
-    enabled: true
   jobs:
     workers: 2
     timeout: 20s

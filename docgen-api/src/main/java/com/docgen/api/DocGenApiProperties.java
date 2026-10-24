@@ -25,7 +25,6 @@ public record DocGenApiProperties(
         @Valid Api api,
         Map<String, String> repositories,
         @Valid Storage storage,
-        @Valid Remote remote,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
         @Valid Auth auth
@@ -34,15 +33,14 @@ public record DocGenApiProperties(
     public DocGenApiProperties {
         repositories = repositories == null ? Map.of() : Map.copyOf(repositories);
         storage = Objects.requireNonNullElseGet(storage, () -> new Storage(null, false));
-        remote = Objects.requireNonNullElseGet(remote, () -> new Remote(false));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
-        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
+        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null));
     }
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
     DocGenApiProperties(Api api, Map<String, String> repositories) {
-        this(api, repositories, null, null, null, null, null);
+        this(api, repositories, null, null, null, null);
     }
 
     public record Api(
@@ -75,10 +73,6 @@ public record DocGenApiProperties(
     public record Storage(String dataDirectory, boolean inMemory) {
     }
 
-    /** Operator-level gate: remote providers are unusable unless this is true. */
-    public record Remote(boolean enabled) {
-    }
-
     public record Jobs(
             @Min(0) @Max(16) int workers,
             @Min(0) @Max(256) int queueCapacity,
@@ -109,11 +103,10 @@ public record DocGenApiProperties(
         }
     }
 
-    public record Auth(Duration tokenTtl, Duration idleTimeout, Duration consentTtl) {
+    public record Auth(Duration tokenTtl, Duration idleTimeout) {
         public Auth {
             tokenTtl = tokenTtl == null ? Duration.ofHours(8) : tokenTtl;
             idleTimeout = idleTimeout == null ? Duration.ofMinutes(30) : idleTimeout;
-            consentTtl = consentTtl == null ? Duration.ofMinutes(10) : consentTtl;
         }
     }
 }
