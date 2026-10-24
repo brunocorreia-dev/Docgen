@@ -1,5 +1,6 @@
 package com.docgen.api;
 
+import com.docgen.ProviderSelection;
 import org.flywaydb.core.Flyway;
 import org.h2.Driver;
 import org.junit.jupiter.api.Test;
@@ -16,13 +17,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 /** Runs the real Flyway migrations on a throwaway H2 database, one version at a time. */
 class MigrationTest {
     @Test
-    void v2MovesProjectsToOllamaAndKeepsPlanHistory() {
+    void v2MovesProjectsToOllamaWithTheDefaultModelAndKeepsPlanHistory() {
         SimpleDriverDataSource dataSource = new SimpleDriverDataSource(new Driver(),
                 "jdbc:h2:mem:migration-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "docgen", "");
         migrateTo(dataSource, "1");
         JdbcClient jdbc = JdbcClient.create(dataSource);
         insertProject(jdbc, "11111111-1111-1111-1111-111111111111", "remote-cloud", "large-remote-model");
-        insertProject(jdbc, "22222222-2222-2222-2222-222222222222", "ollama", "qwen2.5-coder:7b");
+        insertProject(jdbc, "22222222-2222-2222-2222-222222222222", "ollama", "llama3.2");
         jdbc.sql("""
                         INSERT INTO plans (id, project_id, owner, status, provider, model, plan_json, mermaid,
                                            warnings_json, created_at)
@@ -36,10 +37,13 @@ class MigrationTest {
 
         Map<String, Object> moved = project(jdbc, "11111111-1111-1111-1111-111111111111");
         assertEquals("ollama", moved.get("PROVIDER"));
-        assertNull(moved.get("MODEL"), "a remote model name is meaningless for Ollama");
+        assertNull(moved.get("MODEL"), "the remote model name is cleared, never kept");
+        assertEquals("qwen2.5-coder:7b",
+                AiWorkflowService.effectiveModel(new ProviderSelection((String) moved.get("MODEL"))),
+                "a cleared model means the default model, exactly like a project created without one");
         Map<String, Object> untouched = project(jdbc, "22222222-2222-2222-2222-222222222222");
         assertEquals("ollama", untouched.get("PROVIDER"));
-        assertEquals("qwen2.5-coder:7b", untouched.get("MODEL"));
+        assertEquals("llama3.2", untouched.get("MODEL"), "a model chosen for Ollama is kept");
         assertEquals(List.of("remote-cloud"), jdbc.sql("SELECT provider FROM plans").query(String.class).list(),
                 "plans keep the provider that actually produced them");
     }
