@@ -594,7 +594,7 @@ A descrição detalhada de cada componente e das fronteiras de segurança está 
 
 ### Estratégia de testes
 
-A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais ao Ollama: os testes da API substituem o provedor por um duplo programável, e os do core usam um Ollama falso em loopback. Contagem atual: **184** testes no core, **16** na CLI, **56** na API e **49** no frontend.
+A suíte usa JUnit Jupiter (Java) e `node:test` (frontend), sem chamadas reais ao Ollama: os testes da API substituem o provedor por um duplo programável, e os do core usam um Ollama falso em loopback. Contagem atual: **189** testes no core, **16** na CLI, **56** na API e **49** no frontend.
 
 | Classe de teste | Foco |
 |---|---|
