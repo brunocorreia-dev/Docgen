@@ -15,7 +15,7 @@ export const LIMITS = Object.freeze({
 });
 
 export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
-export const PROVIDERS = ['groq', 'ollama'];
+export const PROVIDERS = ['ollama'];
 export const LANGUAGES = ['pt-BR', 'en'];
 
 /** Splits a multi-line field into trimmed, unique, non-empty items. */

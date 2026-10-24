@@ -133,7 +133,6 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
     },
     session: () => request('GET', '/api/v1/auth/session'),
     health: () => request('GET', '/api/v1/health'),
-    providers: () => request('GET', '/api/v1/providers'),
 
     listProjects: () => request('GET', '/api/v1/projects'),
     getProject: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}`),
@@ -151,8 +150,6 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
     deleteAttachment: (projectId, attachmentId) =>
       request('DELETE', `/api/v1/projects/${id(projectId)}/attachments/${id(attachmentId)}`),
 
-    previewTransmission: (projectId, preview) =>
-      post(`/api/v1/projects/${id(projectId)}/transmission-previews`, preview),
     startPlanning: (projectId, options = {}) => post(`/api/v1/projects/${id(projectId)}/plans`, options),
     listPlans: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}/plans`),
     getPlan: (projectId, planId) => request('GET', `/api/v1/projects/${id(projectId)}/plans/${id(planId)}`),

@@ -274,6 +274,7 @@ code, pre { font-family: var(--mono); }
 .field-label-row { display: flex; justify-content: space-between; align-items: baseline; }
 .field-counter { font-size: 0.75rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .field-hint { font-size: 0.8rem; color: var(--text-faint); }
+.local-model-note { display: flex; align-items: center; gap: 0.45rem; margin: 0 0 0.9rem; }
 .field-error { font-size: 0.82rem; color: #fca5a5; min-height: 0; }
 .field-error:empty { display: none; }
 .field.has-error input, .field.has-error textarea, .field.has-error select { border-color: rgba(248, 113, 113, 0.6); }
@@ -306,16 +307,6 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .demo-banner .icon { color: var(--cyan); }
 .demo-banner span { flex: 1; }
 
-.provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.7rem; }
-.provider-card { position: relative; display: flex; gap: 0.7rem; padding: 0.9rem; border-radius: 14px; border: 1px solid var(--border-strong); background: rgba(6, 9, 20, 0.5); cursor: pointer; transition: border-color 0.2s, background 0.2s, transform 0.2s var(--ease); }
-.provider-card:hover { transform: translateY(-1px); border-color: rgba(140, 160, 255, 0.4); }
-.provider-card:has(input:checked) { border-color: rgba(34, 211, 238, 0.6); background: var(--gradient-soft); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1); }
-.provider-card input { accent-color: var(--cyan); margin-top: 0.2rem; }
-.provider-card.is-disabled { opacity: 0.55; }
-.provider-card-body { display: flex; flex-direction: column; gap: 0.25rem; }
-.provider-card-title { display: flex; align-items: center; gap: 0.45rem; font-weight: 650; }
-.provider-card-text { font-size: 0.82rem; color: var(--text-muted); }
-.provider-card-warning { font-size: 0.78rem; color: var(--amber); }
 
 .toggle { display: flex; align-items: center; gap: 0.7rem; cursor: pointer; }
 .toggle input { position: absolute; opacity: 0; }
