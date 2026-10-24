@@ -8,6 +8,10 @@ public final class LLMProviderFactory {
     }
 
     public static LLMProvider create(String model) {
-        return new OllamaProvider(model == null || model.isBlank() ? DEFAULT_MODEL : model);
+        return create(model, OllamaEndpoint.DEFAULT);
+    }
+
+    public static LLMProvider create(String model, OllamaEndpoint endpoint) {
+        return new OllamaProvider(model == null || model.isBlank() ? DEFAULT_MODEL : model, endpoint);
     }
 }

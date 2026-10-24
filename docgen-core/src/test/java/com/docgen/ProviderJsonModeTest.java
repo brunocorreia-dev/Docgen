@@ -11,7 +11,7 @@ class ProviderJsonModeTest {
 
     @Test
     void ollamaRequestsJsonFormatOnlyForStructuredCalls() throws Exception {
-        OllamaProvider provider = new OllamaProvider("llama3.2", null);
+        OllamaProvider provider = new OllamaProvider("llama3.2", OllamaEndpoint.DEFAULT);
 
         assertEquals("json", MAPPER.readTree(provider.buildRequestBody("p", true)).path("format").asText());
         assertTrue(MAPPER.readTree(provider.buildRequestBody("p", false)).path("format").isMissingNode());

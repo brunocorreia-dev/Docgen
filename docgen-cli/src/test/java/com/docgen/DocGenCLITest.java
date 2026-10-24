@@ -112,6 +112,18 @@ class DocGenCLITest {
     }
 
     @Test
+    void rejectsAnOllamaPortOutsideTheTcpRange() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+
+        int exitCode = new CommandLine(new DocGenCLI())
+                .execute("--ollama-port", "70000", "-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("between 1 and 65535"));
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
     void remoteTransmissionOptionsNoLongerExist() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
 

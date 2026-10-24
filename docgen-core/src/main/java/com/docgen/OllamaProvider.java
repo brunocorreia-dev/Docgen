@@ -8,7 +8,6 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -18,11 +17,10 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 public final class OllamaProvider implements LLMProvider {
-    private static final URI GENERATE_URL = URI.create("http://127.0.0.1:11434/api/generate");
-    private static final URI TAGS_URL = URI.create("http://127.0.0.1:11434/api/tags");
     private static final ObjectMapper MAPPER = new ObjectMapper();
     static final int MAX_STREAM_LINE_BYTES = 1024 * 1024;
     static final int MAX_STREAM_FRAGMENT_CHARACTERS = 512 * 1024;
@@ -30,17 +28,20 @@ public final class OllamaProvider implements LLMProvider {
     static final int MAX_STREAM_LINES = 32_768;
 
     private final String model;
+    private final OllamaEndpoint endpoint;
     private final HttpClient client;
 
-    public OllamaProvider(String model) {
-        this(model, HttpClient.newBuilder()
+    public OllamaProvider(String model, OllamaEndpoint endpoint) {
+        this(model, endpoint, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .proxy(DirectProxySelector.INSTANCE)
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build());
     }
 
-    OllamaProvider(String model, HttpClient client) {
-        this.model = model;
+    OllamaProvider(String model, OllamaEndpoint endpoint, HttpClient client) {
+        this.model = Objects.requireNonNull(model, "model");
+        this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.client = client;
     }
 
@@ -68,7 +69,7 @@ public final class OllamaProvider implements LLMProvider {
     private String generate(String body) throws Exception {
         ensureOllamaIsRunning();
 
-        HttpRequest request = HttpRequest.newBuilder(GENERATE_URL)
+        HttpRequest request = HttpRequest.newBuilder(endpoint.api("generate"))
                 .timeout(Duration.ofMinutes(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -92,14 +93,14 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     private void ensureOllamaIsRunning() throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(TAGS_URL)
+        HttpRequest request = HttpRequest.newBuilder(endpoint.api("tags"))
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();
         HttpResponse<Void> response = HttpExchange.send(
                 client, request, HttpResponse.BodyHandlers.discarding(), Duration.ofSeconds(5), "Ollama");
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("Ollama is not responding on http://127.0.0.1:11434 (HTTP "
+            throw new IOException("Ollama is not responding on " + endpoint + " (HTTP "
                     + response.statusCode() + ").");
         }
     }

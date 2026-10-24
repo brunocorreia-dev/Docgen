@@ -4,6 +4,7 @@ import com.docgen.ArchitecturePlanningService;
 import com.docgen.DocumentationService;
 import com.docgen.LLMProviderFactory;
 import com.docgen.LLMProviderResolver;
+import com.docgen.OllamaEndpoint;
 import com.docgen.ProjectDocumentationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,8 +18,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration(proxyBeanMethods = false)
 class ProviderConfig {
     @Bean
-    LLMProviderResolver llmProviderResolver() {
-        return LLMProviderFactory::create;
+    LLMProviderResolver llmProviderResolver(DocGenApiProperties properties) {
+        OllamaEndpoint endpoint = properties.ollama().endpoint();
+        return model -> LLMProviderFactory.create(model, endpoint);
     }
 
     @Bean

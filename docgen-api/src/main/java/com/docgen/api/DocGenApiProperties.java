@@ -1,5 +1,6 @@
 package com.docgen.api;
 
+import com.docgen.OllamaEndpoint;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,6 +26,7 @@ public record DocGenApiProperties(
         @Valid Api api,
         Map<String, String> repositories,
         @Valid Storage storage,
+        @Valid Ollama ollama,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
         @Valid Auth auth
@@ -33,6 +35,7 @@ public record DocGenApiProperties(
     public DocGenApiProperties {
         repositories = repositories == null ? Map.of() : Map.copyOf(repositories);
         storage = Objects.requireNonNullElseGet(storage, () -> new Storage(null, false));
+        ollama = Objects.requireNonNullElseGet(ollama, () -> new Ollama(0));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
         auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null));
@@ -40,7 +43,7 @@ public record DocGenApiProperties(
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
     DocGenApiProperties(Api api, Map<String, String> repositories) {
-        this(api, repositories, null, null, null, null);
+        this(api, repositories, null, null, null, null, null);
     }
 
     public record Api(
@@ -71,6 +74,17 @@ public record DocGenApiProperties(
      * @param inMemory      use a throwaway in-memory database (tests and demos)
      */
     public record Storage(String dataDirectory, boolean inMemory) {
+    }
+
+    /** Port of the local Ollama service; the host is always 127.0.0.1 and cannot be configured. */
+    public record Ollama(@Min(0) @Max(65_535) int port) {
+        public Ollama {
+            port = port == 0 ? OllamaEndpoint.DEFAULT_PORT : port;
+        }
+
+        public OllamaEndpoint endpoint() {
+            return new OllamaEndpoint(port);
+        }
     }
 
     public record Jobs(

@@ -30,6 +30,10 @@ public final class DocGenCLI implements Callable<Integer> {
     @Option(names = "--model", description = "Ollama model. Default: " + LLMProviderFactory.DEFAULT_MODEL + ".")
     private String model;
 
+    @Option(names = "--ollama-port", defaultValue = "11434", paramLabel = "port",
+            description = "Port of the local Ollama service. The host is always 127.0.0.1. Default: ${DEFAULT-VALUE}.")
+    private int ollamaPort;
+
     @Option(names = "--force", description = "Overwrite existing documentation or prompt-preview files.")
     private boolean force;
 
@@ -96,7 +100,7 @@ public final class DocGenCLI implements Callable<Integer> {
             throw new IllegalArgumentException("Unsupported provider: " + provider
                     + ". DocGen runs only on the local Ollama service (--provider ollama).");
         }
-        return LLMProviderFactory.create(selectedModel);
+        return LLMProviderFactory.create(selectedModel, new OllamaEndpoint(ollamaPort));
     }
 
     static String safeFailureMessage(Throwable failure) {

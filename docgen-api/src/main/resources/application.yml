@@ -40,6 +40,9 @@ docgen:
   storage:
     data-directory: ${DOCGEN_DATA_DIR:}
     in-memory: false
+  ollama:
+    # Only the port is configurable; DocGen always talks to Ollama on 127.0.0.1.
+    port: ${DOCGEN_OLLAMA_PORT:11434}
   jobs:
     workers: ${DOCGEN_JOB_WORKERS:2}
     queue-capacity: 16
