@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Estado | **Aceita na essência** (decisão 4.1 do pedido de realinhamento). Os itens marcados "pendente" aguardam aprovação. |
+| Estado | **Aceita** (decisão 4.1 do pedido de realinhamento; os pontos que estavam pendentes foram decididos na aprovação da Fase 0) |
 | Data | 2026-10-24 |
 | Fase | Proposta na Fase 0; implementação na Fase 2 |
 | Relacionadas | [ADR 0002](0002-autenticacao-por-token-de-lancamento.md), [ADR 0003](0003-somente-local.md), [roadmap](../desktop/ROADMAP.md) |
@@ -44,16 +44,17 @@ uma janela Swing além do navegador e um pareamento manual a cada abertura.
    pelo SO (sinal ou logout) aciona o *shutdown hook* padrão do Spring.
 4. **Bandeja (opcional).** Ícone em `SystemTray` com "Abrir DocGen" e "Sair", só quando
    `SystemTray.isSupported()`. Sem suporte (por exemplo GNOME sem extensão), nada quebra.
-5. **Pendente: desligamento por inatividade.** Como fechar a aba não encerra o processo, proponho encerrar o
-   app quando nenhuma aba estiver conectada por 10 minutos e não houver download nem geração em andamento.
-   A UI mantém um sinal de presença (o próprio stream de status ou uma chamada periódica).
+5. **Desligamento por inatividade (Fase 2).** Como fechar a aba não encerra o processo, a UI envia um
+   heartbeat periódico. O app encerra quando passa **10 minutos sem heartbeat**, e **nunca** enquanto houver
+   um download de modelo ou uma geração em andamento. Nesse caso o prazo só começa a contar quando a última
+   operação termina.
 6. **Diretório de dados por SO:**
 
    | SO | Diretório | Observação |
    |---|---|---|
    | Linux | `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` | É o caminho atual: os dados existentes continuam válidos. |
    | macOS | `~/Library/Application Support/DocGen` | — |
-   | Windows | **Pendente:** `%LOCALAPPDATA%\DocGen` (proposta) ou `%APPDATA%\DocGen` (pedido) | `AppData\Roaming` é sincronizado com o servidor em perfis móveis de domínio, o que tiraria as conversas do computador. Por isso proponho `Local`. |
+   | Windows | `%LOCALAPPDATA%\DocGen` | Decidido na aprovação da Fase 0: `AppData\Roaming` (`%APPDATA%`) é sincronizado com o servidor em perfis móveis de domínio, o que tiraria as conversas do computador. |
 
    Variáveis de ambiente só valem com caminho absoluto e normalizado. Os diretórios são criados com `0700`
    onde houver POSIX e nunca podem ser link simbólico.
@@ -76,7 +77,7 @@ uma janela Swing além do navegador e um pareamento manual a cada abertura.
 
 - O app depende de existir um navegador no sistema (praticamente universal) e se parece com um app só
   quando há Chromium para o modo `--app`. Com outro navegador, abre como aba comum.
-- A vida do processo não acompanha a vida da janela: daí a bandeja e o desligamento por inatividade
+- A vida do processo não acompanha a vida da janela: daí a bandeja e o desligamento por falta de heartbeat
   (item 5).
 - A instância única elimina o erro do H2 "banco em uso" num segundo clique. A trava do arquivo do H2
   continua como segunda barreira.
@@ -89,5 +90,7 @@ uma janela Swing além do navegador e um pareamento manual a cada abertura.
 - `java -jar docgen-api.jar`, sem nenhuma variável de ambiente, abre a UI autenticada no navegador.
 - A segunda execução reabre a mesma instância e não sobe um segundo servidor.
 - "Sair" encerra o servidor e libera a trava; uma nova execução sobe limpa.
+- Sem heartbeat por 10 minutos, o app encerra; com download ou geração em andamento, não encerra (teste com
+  relógio controlado).
 - Testes automatizados para trava, reabertura com segredo errado (recusada), escolha de porta e fallback de
   abertura do navegador (com abridor falso).
