@@ -57,6 +57,7 @@ public final class ProjectDocumentationService {
         Objects.requireNonNull(selection, "selection");
         Objects.requireNonNull(progressListener, "progressListener");
         LLMProvider provider = providerResolver.create(selection.model());
+        provider.requireFits(preparation.readmePrompt(), preparation.architecturePrompt());
         progressListener.generationStarted(DocumentationService.Artifact.README);
         String readme = validated(provider.generateDocumentation(preparation.readmePrompt()),
                 DocumentationArtifacts.README);

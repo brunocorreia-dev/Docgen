@@ -63,6 +63,20 @@ class OllamaContextWindowTest {
     }
 
     @Test
+    void requireFitsChecksEveryPromptWithOneLookupAndSendsNothing() throws Exception {
+        try (FakeOllamaServer ollama = new FakeOllamaServer().modelContextTokens(32_768)) {
+            OllamaProvider provider = provider(ollama);
+
+            assertThrows(PromptTooLargeException.class, () -> provider.requireFits("hello", MEASURED_PROMPT));
+            provider.requireFits("hello", "world");
+            provider.generateDocumentation("hello");
+
+            assertEquals(java.util.List.of("/api/show", "/api/generate"), ollama.requestedPaths(),
+                    "the context window is looked up once per provider");
+        }
+    }
+
+    @Test
     void smallPromptsGetTheSmallestRoundedWindow() throws Exception {
         try (FakeOllamaServer ollama = new FakeOllamaServer()) {
             provider(ollama).generateStructured("hello");

@@ -101,9 +101,8 @@ class DocGenCLITest {
     @Test
     void aMissingModelFailsWithInstallInstructionsAndNoDownload() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
-        DocumentationService service = new DocumentationService(model -> prompt -> {
-            throw new ModelNotInstalledException(LLMProviderFactory.DEFAULT_MODEL);
-        });
+        DocumentationService service = new DocumentationService(model -> failingCheck(
+                new ModelNotInstalledException(LLMProviderFactory.DEFAULT_MODEL)));
 
         int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
 
@@ -112,15 +111,15 @@ class DocGenCLITest {
         assertTrue(error.contains("qwen2.5-coder:7b is not installed"), error);
         assertTrue(error.contains("never downloads"), error);
         assertTrue(error.contains("ollama pull qwen2.5-coder:7b"), error);
+        assertFalse(stdout.toString(StandardCharsets.UTF_8).contains("Generating"), "nothing is announced");
         assertFalse(Files.exists(out.resolve("README.md")));
     }
 
     @Test
     void aPromptTooLargeForTheModelExplainsHowToNarrowTheInput() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
-        DocumentationService service = new DocumentationService(model -> prompt -> {
-            throw new PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768);
-        });
+        DocumentationService service = new DocumentationService(model -> failingCheck(
+                new PromptTooLargeException("qwen2.5-coder:7b", 40_000, 32_768)));
 
         int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
 
@@ -128,6 +127,8 @@ class DocGenCLITest {
         String error = stderr.toString(StandardCharsets.UTF_8);
         assertTrue(error.contains("accepts at most 32768"), error);
         assertTrue(error.contains("--include-ext"), error);
+        assertFalse(stdout.toString(StandardCharsets.UTF_8).contains("Generating"),
+                "the size is checked before \"Generating...\" is printed");
         assertFalse(Files.exists(out.resolve("README.md")));
     }
 
@@ -228,6 +229,21 @@ class DocGenCLITest {
         assertFalse(error.contains("provider-that-does-not-exist"), error);
         assertEquals("keep-me", Files.readString(out.resolve("README.md")));
         assertFalse(Files.exists(out.resolve("ARCHITECTURE.md")));
+    }
+
+    /** A provider whose fit check fails the way OllamaProvider does, before any generation. */
+    private static LLMProvider failingCheck(Exception failure) {
+        return new LLMProvider() {
+            @Override
+            public String generateDocumentation(String prompt) {
+                throw new AssertionError("generation must not start");
+            }
+
+            @Override
+            public void requireFits(String... prompts) throws Exception {
+                throw failure;
+            }
+        };
     }
 
     @Test

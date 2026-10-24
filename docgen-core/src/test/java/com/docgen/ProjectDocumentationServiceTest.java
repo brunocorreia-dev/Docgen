@@ -42,6 +42,32 @@ class ProjectDocumentationServiceTest {
     }
 
     @Test
+    void bothPromptsAreCheckedBeforeAnyProgressIsReported() throws Exception {
+        List<DocumentationService.Artifact> progress = new ArrayList<>();
+        ProjectDocumentationService service = new ProjectDocumentationService(model -> new LLMProvider() {
+            @Override
+            public String generateDocumentation(String prompt) {
+                throw new AssertionError("nothing may be generated");
+            }
+
+            @Override
+            public void requireFits(String... prompts) throws Exception {
+                assertEquals(2, prompts.length);
+                throw new PromptTooLargeException("m", 50_000, 32_768);
+            }
+        });
+
+        assertThrows(PromptTooLargeException.class, () -> service.generate(service.prepare(PlanFixtures.brief(), plan()),
+                new ProviderSelection(null), new DocumentationService.ProgressListener() {
+                    @Override
+                    public void generationStarted(DocumentationService.Artifact artifact) {
+                        progress.add(artifact);
+                    }
+                }));
+        assertTrue(progress.isEmpty());
+    }
+
+    @Test
     void activeMarkdownFromTheModelIsRejected() throws Exception {
         ProjectDocumentationService service = new ProjectDocumentationService(model ->
                 new ArchitecturePlanningServiceTest.FakeProvider("# Hi\n\n<script>alert(1)</script>"));

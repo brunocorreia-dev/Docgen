@@ -159,6 +159,41 @@ class DocumentationServiceTest {
     }
 
     @Test
+    void aPromptThatCannotFitFailsBeforeAnyProgressOrGeneration() throws Exception {
+        Files.writeString(repository.resolve("App.java"), "class App {}");
+        AtomicInteger calls = new AtomicInteger();
+        List<DocumentationService.Artifact> started = new java.util.ArrayList<>();
+        List<Integer> checkedPrompts = new java.util.ArrayList<>();
+        LLMProvider provider = new LLMProvider() {
+            @Override
+            public String generateDocumentation(String prompt) {
+                calls.incrementAndGet();
+                return "# Never";
+            }
+
+            @Override
+            public void requireFits(String... prompts) throws Exception {
+                checkedPrompts.add(prompts.length);
+                throw new PromptTooLargeException("m", 50_000, 32_768);
+            }
+        };
+
+        assertThrows(PromptTooLargeException.class, () -> service(model -> provider).execute(
+                request(DocumentationRequest.Operation.GENERATE, List.of(), true),
+                new DocumentationService.ProgressListener() {
+                    @Override
+                    public void generationStarted(DocumentationService.Artifact artifact) {
+                        started.add(artifact);
+                    }
+                }));
+
+        assertEquals(List.of(2), checkedPrompts, "both prompts are checked together");
+        assertTrue(started.isEmpty(), "no generation is announced");
+        assertEquals(0, calls.get());
+        assertFalse(Files.exists(output.resolve("README.md")));
+    }
+
+    @Test
     void passesTheRequestedModelToTheLocalProvider() throws Exception {
         Files.writeString(repository.resolve("App.java"), "class App {}");
         AtomicInteger calls = new AtomicInteger();

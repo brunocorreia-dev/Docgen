@@ -54,6 +54,8 @@ public final class OllamaProvider implements LLMProvider {
     private final String model;
     private final OllamaEndpoint endpoint;
     private final HttpClient client;
+    /** Looked up once: a provider serves a single operation for a single model. */
+    private Integer maximumContextTokens;
 
     public OllamaProvider(String model, OllamaEndpoint endpoint) {
         this(model, endpoint, HttpClient.newBuilder()
@@ -77,6 +79,14 @@ public final class OllamaProvider implements LLMProvider {
     @Override
     public String generateStructured(String prompt) throws Exception {
         return generate(prompt, true);
+    }
+
+    @Override
+    public void requireFits(String... prompts) throws Exception {
+        int maximum = maximumContextTokens();
+        for (String prompt : prompts) {
+            contextWindowFor(prompt, maximum, model);
+        }
     }
 
     String buildRequestBody(String prompt, boolean json, int contextTokens) throws IOException {
@@ -142,8 +152,15 @@ public final class OllamaProvider implements LLMProvider {
         return BoundedUtf8BodySubscriber.of(maxBytes, "Ollama");
     }
 
-    /** Asks Ollama for the model's maximum context ({@code <architecture>.context_length} in {@code model_info}). */
     private int maximumContextTokens() throws IOException, InterruptedException {
+        if (maximumContextTokens == null) {
+            maximumContextTokens = fetchMaximumContextTokens();
+        }
+        return maximumContextTokens;
+    }
+
+    /** Asks Ollama for the model's maximum context ({@code <architecture>.context_length} in {@code model_info}). */
+    private int fetchMaximumContextTokens() throws IOException, InterruptedException {
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model", model);
         HttpRequest request = HttpRequest.newBuilder(endpoint.api("show"))

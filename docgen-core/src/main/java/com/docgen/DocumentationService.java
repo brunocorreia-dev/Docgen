@@ -105,6 +105,7 @@ public final class DocumentationService {
         }
 
         LLMProvider provider = providerResolver.create(request.model());
+        provider.requireFits(readmePrompt, architecturePrompt);
 
         progressListener.generationStarted(Artifact.README);
         String readme = DocumentationValidator.redactAndValidate(
