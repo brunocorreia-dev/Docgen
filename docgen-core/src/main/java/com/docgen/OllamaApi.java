@@ -23,4 +23,18 @@ public interface OllamaApi {
 
     /** {@code DELETE /api/delete}; {@link ModelNotInstalledException} when the model is not installed. */
     void delete(String model) throws IOException, InterruptedException;
+
+    /**
+     * {@code POST /api/pull}: Ollama downloads the model from its library and
+     * reports progress until it succeeds. Only after an explicit click of the
+     * user (ADR 0003). Cancelling closes the connection, which stops the
+     * download; Ollama resumes it on the next pull. Throws
+     * {@link java.util.concurrent.CancellationException} when cancelled.
+     */
+    void pull(String model, PullListener listener, Cancellation cancellation) throws IOException, InterruptedException;
+
+    @FunctionalInterface
+    interface PullListener {
+        void onProgress(PullProgress progress);
+    }
 }

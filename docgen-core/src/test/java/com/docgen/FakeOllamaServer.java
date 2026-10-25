@@ -16,7 +16,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 /**
@@ -51,6 +53,76 @@ final class FakeOllamaServer implements AutoCloseable {
 
     /** A canned answer for one route. */
     record Response(int status, String body) {
+    }
+
+    /** What a streamed route does after its scripted lines. */
+    enum After {
+        /** Ends the response. */
+        CLOSE,
+        /** Keeps the connection open and sends nothing (up to 10 s). */
+        SILENCE,
+        /** Repeats the last line until the client goes away (up to 30 s). */
+        REPEAT_LAST
+    }
+
+    private record Stream(List<String> lines, Duration interval, After after) {
+    }
+
+    private final Map<String, Stream> streams = new ConcurrentHashMap<>();
+    private final Map<String, CountDownLatch> clientGone = new ConcurrentHashMap<>();
+
+    /** Streams these NDJSON lines on a route, one every {@code interval}, then does {@code after}. */
+    FakeOllamaServer stream(String path, List<String> lines, Duration interval, After after) {
+        streams.put(path, new Stream(List.copyOf(lines), interval, after));
+        clientGone.put(path, new CountDownLatch(1));
+        server.createContext(path, this::streamed);
+        return this;
+    }
+
+    /** Counts down when a write to the streamed route fails because the client closed the connection. */
+    CountDownLatch clientGone(String path) {
+        return clientGone.get(path);
+    }
+
+    private void streamed(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        requestedPaths.add(path);
+        requestBodies.add(MAPPER.readTree(exchange.getRequestBody().readAllBytes()));
+        Stream stream = streams.get(path);
+        exchange.getResponseHeaders().set("Content-Type", "application/x-ndjson");
+        exchange.sendResponseHeaders(200, 0);
+        OutputStream output = exchange.getResponseBody();
+        try {
+            for (String line : stream.lines()) {
+                output.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                pause(stream.interval());
+            }
+            if (stream.after() == After.SILENCE) {
+                pause(Duration.ofSeconds(10));
+            } else if (stream.after() == After.REPEAT_LAST) {
+                long until = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+                byte[] last = (stream.lines().getLast() + "\n").getBytes(StandardCharsets.UTF_8);
+                while (System.nanoTime() < until) {
+                    output.write(last);
+                    output.flush();
+                    pause(stream.interval());
+                }
+            }
+            output.close();
+        } catch (IOException gone) {
+            clientGone.get(path).countDown();
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private static void pause(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     FakeOllamaServer() throws IOException {

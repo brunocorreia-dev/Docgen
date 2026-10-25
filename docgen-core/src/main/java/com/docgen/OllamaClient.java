@@ -37,14 +37,21 @@ public final class OllamaClient implements OllamaApi {
 
     private final OllamaEndpoint endpoint;
     private final HttpClient client;
+    private final OllamaStream.Limits pullLimits;
 
     public OllamaClient(OllamaEndpoint endpoint) {
-        this(endpoint, directClient());
+        this(endpoint, directClient(), PULL_LIMITS);
     }
 
     OllamaClient(OllamaEndpoint endpoint, HttpClient client) {
+        this(endpoint, client, PULL_LIMITS);
+    }
+
+    /** Tests shorten the stream limits; production uses the constants below. */
+    OllamaClient(OllamaEndpoint endpoint, HttpClient client, OllamaStream.Limits pullLimits) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.client = Objects.requireNonNull(client, "client");
+        this.pullLimits = Objects.requireNonNull(pullLimits, "pullLimits");
     }
 
     /** The only way DocGen builds an HTTP client for Ollama: short connect timeout, no proxy, no redirects. */
@@ -104,6 +111,67 @@ public final class OllamaClient implements OllamaApi {
             throw new ModelNotInstalledException(name);
         }
         requireSuccess(response, "delete");
+    }
+
+    @Override
+    public void pull(String model, PullListener listener, Cancellation cancellation)
+            throws IOException, InterruptedException {
+        String name = requireModelName(model);
+        RemoteModels.requireLocal(name, false);
+        Objects.requireNonNull(listener, "listener");
+        ObjectNode body = OllamaJson.MAPPER.createObjectNode();
+        body.put("model", name);
+        body.put("stream", true);
+        // No HttpRequest timeout: the stream's watchdog bounds the wait for headers and for every byte.
+        HttpRequest request = HttpRequest.newBuilder(endpoint.api("pull"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(OllamaJson.MAPPER.writeValueAsString(body)))
+                .build();
+        OllamaStream.exchange(client, request, pullLimits, cancellation,
+                status -> new IOException("Ollama answered pull with HTTP " + status + "."),
+                line -> acceptPullLine(line, listener));
+    }
+
+    /**
+     * A pull reports a few events per second while downloading; verifying a
+     * large model can stay silent for a while, hence the generous idle limit.
+     * The deadline covers a 20 GB model on a slow connection.
+     */
+    static final OllamaStream.Limits PULL_LIMITS = new OllamaStream.Limits(
+            16 * 1024, 1L << 30, 4_000_000, Duration.ofMinutes(5), Duration.ofHours(24));
+    private static final Pattern LAYER_DIGEST = Pattern.compile("sha256:[0-9a-f]{64}");
+    private static final long MAX_LAYER_BYTES = 1L << 50;
+
+    static boolean acceptPullLine(JsonNode line, PullListener listener) throws IOException {
+        JsonNode error = line.path("error");
+        if (!error.isMissingNode() && !error.isNull()) {
+            throw ModelPullException.from(error.isTextual() ? error.asText() : null);
+        }
+        String status = OllamaJson.text(line, "status", 512, "download progress");
+        if (status == null) {
+            throw new IOException("Ollama returned an invalid download progress.");
+        }
+        String digest = OllamaJson.text(line, "digest", 80, "download progress");
+        if (digest != null && !LAYER_DIGEST.matcher(digest).matches()) {
+            digest = null;
+        }
+        long total = optionalBytes(line, "total");
+        long completed = Math.min(optionalBytes(line, "completed"), total == 0 ? Long.MAX_VALUE : total);
+        PullProgress.Stage stage = PullProgress.Stage.of(status, digest);
+        listener.onProgress(new PullProgress(stage, digest, total, completed));
+        return stage == PullProgress.Stage.SUCCESS;
+    }
+
+    private static long optionalBytes(JsonNode line, String field) throws IOException {
+        JsonNode value = line.path(field);
+        if (value.isMissingNode() || value.isNull()) {
+            return 0;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.asLong() < 0
+                || value.asLong() > MAX_LAYER_BYTES) {
+            throw new IOException("Ollama returned an invalid download progress.");
+        }
+        return value.asLong();
     }
 
     /** Model names are restricted like everywhere else in DocGen (see {@link ProviderSelection#MODEL}). */
