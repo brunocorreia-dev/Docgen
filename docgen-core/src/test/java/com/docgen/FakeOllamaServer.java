@@ -14,6 +14,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 
 /**
  * Loopback HTTP stand-in for Ollama that reproduces the context behavior
@@ -36,17 +40,68 @@ final class FakeOllamaServer implements AutoCloseable {
 
     private final HttpServer server;
     private final List<JsonNode> generateRequests = Collections.synchronizedList(new ArrayList<>());
+    private final List<JsonNode> requestBodies = Collections.synchronizedList(new ArrayList<>());
     private final List<String> requestedPaths = Collections.synchronizedList(new ArrayList<>());
+    private final Map<String, String> showBodies = new ConcurrentHashMap<>();
+    private final Map<String, Response> fixed = new ConcurrentHashMap<>();
+    private final Set<String> deletable = ConcurrentHashMap.newKeySet();
     private volatile Integer modelContextTokens = 32_768;
     private volatile boolean modelInstalled = true;
     private volatile boolean ignoresNumCtx;
 
+    /** A canned answer for one route. */
+    record Response(int status, String body) {
+    }
+
     FakeOllamaServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.setExecutor(Executors.newCachedThreadPool(runnable -> {
+            Thread thread = new Thread(runnable, "fake-ollama");
+            thread.setDaemon(true);
+            return thread;
+        }));
         server.createContext("/", this::unknown);
         server.createContext("/api/show", this::show);
         server.createContext("/api/generate", this::generate);
+        server.createContext("/api/version", exchange -> fixedOr(exchange, new Response(200, "{\"version\":\"0.32.11\"}")));
+        server.createContext("/api/tags", exchange -> fixedOr(exchange, new Response(200, "{\"models\":[]}")));
+        server.createContext("/api/ps", exchange -> fixedOr(exchange, new Response(200, "{\"models\":[]}")));
+        server.createContext("/api/delete", this::delete);
         server.start();
+    }
+
+    /** Answers a route with this status and body instead of its default. */
+    FakeOllamaServer respond(String path, int status, String body) {
+        fixed.put(path, new Response(status, body));
+        return this;
+    }
+
+    /** Answers {@code /api/show} for one model with this body (other models keep the default). */
+    FakeOllamaServer show(String model, String body) {
+        showBodies.put(model, body);
+        return this;
+    }
+
+    /** Models that {@code /api/delete} removes; any other name gets Ollama's 404. */
+    FakeOllamaServer deletable(String... models) {
+        deletable.addAll(List.of(models));
+        return this;
+    }
+
+    /** JSON request bodies, in order, of every route that has one. */
+    List<JsonNode> requestBodies() {
+        synchronized (requestBodies) {
+            return List.copyOf(requestBodies);
+        }
+    }
+
+    static String fixture(String name) throws IOException {
+        try (var stream = FakeOllamaServer.class.getResourceAsStream("/ollama/" + name)) {
+            if (stream == null) {
+                throw new IOException("missing fixture " + name);
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     OllamaEndpoint endpoint() {
@@ -99,9 +154,38 @@ final class FakeOllamaServer implements AutoCloseable {
         respond(exchange, 404, "{\"error\":\"not implemented by the fake\"}");
     }
 
-    private void show(HttpExchange exchange) throws IOException {
+    private void fixedOr(HttpExchange exchange, Response fallback) throws IOException {
         requestedPaths.add(exchange.getRequestURI().getPath());
         exchange.getRequestBody().readAllBytes();
+        Response response = fixed.getOrDefault(exchange.getRequestURI().getPath(), fallback);
+        respond(exchange, response.status(), response.body());
+    }
+
+    private void delete(HttpExchange exchange) throws IOException {
+        requestedPaths.add(exchange.getRequestURI().getPath());
+        JsonNode request = MAPPER.readTree(exchange.getRequestBody().readAllBytes());
+        requestBodies.add(request);
+        if (!"DELETE".equals(exchange.getRequestMethod())) {
+            respond(exchange, 405, "{\"error\":\"method not allowed\"}");
+            return;
+        }
+        String model = request.path("model").asText();
+        if (deletable.remove(model)) {
+            respond(exchange, 200, "");
+        } else {
+            respond(exchange, 404, "{\"error\":\"model '" + model + "' not found\"}");
+        }
+    }
+
+    private void show(HttpExchange exchange) throws IOException {
+        requestedPaths.add(exchange.getRequestURI().getPath());
+        JsonNode request = MAPPER.readTree(exchange.getRequestBody().readAllBytes());
+        requestBodies.add(request);
+        String override = showBodies.get(request.path("model").asText());
+        if (override != null) {
+            respond(exchange, 200, override);
+            return;
+        }
         if (!modelInstalled) {
             respond(exchange, 404, "{\"error\":\"model not found\"}");
             return;
@@ -133,7 +217,7 @@ final class FakeOllamaServer implements AutoCloseable {
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(bytes);
         }

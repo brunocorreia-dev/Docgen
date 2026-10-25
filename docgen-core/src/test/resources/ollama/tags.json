@@ -1,0 +1,89 @@
+{
+ "models": [
+  {
+   "name": "docgen-probe-remote:latest",
+   "model": "docgen-probe-remote:latest",
+   "remote_model": "qwen2.5:14b",
+   "remote_host": "http://127.0.0.1:9",
+   "modified_at": "2026-10-25T10:54:23.975661076-03:00",
+   "size": 191,
+   "digest": "25b1e45855fc56c705a652242a87704ee523f814ae250922c797954f1bbbbdf7",
+   "details": {
+    "parent_model": "",
+    "format": "",
+    "family": "",
+    "families": null,
+    "parameter_size": "",
+    "quantization_level": ""
+   }
+  },
+  {
+   "name": "qwen2.5:14b",
+   "model": "qwen2.5:14b",
+   "modified_at": "2026-09-27T13:21:16.82597645-03:00",
+   "size": 8988124069,
+   "digest": "7cdf5a0187d5c58cc5d369b255592f7841d1c4696d45a8c8a9489440385b22f6",
+   "details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "qwen2",
+    "families": [
+     "qwen2"
+    ],
+    "parameter_size": "14.8B",
+    "quantization_level": "Q4_K_M",
+    "context_length": 32768,
+    "embedding_length": 5120
+   },
+   "capabilities": [
+    "completion",
+    "tools"
+   ]
+  },
+  {
+   "name": "gemma4:26b",
+   "model": "gemma4:26b",
+   "modified_at": "2026-08-14T09:24:28.221051115-03:00",
+   "size": 17987581215,
+   "digest": "5571076f3d70050487b26b341705799e0ab29b808164f90d20d4cf84f699d251",
+   "details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "gemma4",
+    "families": [
+     "gemma4"
+    ],
+    "parameter_size": "25.8B",
+    "quantization_level": "Q4_K_M"
+   },
+   "capabilities": [
+    "completion",
+    "tools",
+    "thinking"
+   ]
+  },
+  {
+   "name": "llama3.2:latest",
+   "model": "llama3.2:latest",
+   "modified_at": "2026-06-21T15:23:04.651734358-03:00",
+   "size": 2019393189,
+   "digest": "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72",
+   "details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "llama",
+    "families": [
+     "llama"
+    ],
+    "parameter_size": "3.2B",
+    "quantization_level": "Q4_K_M",
+    "context_length": 131072,
+    "embedding_length": 3072
+   },
+   "capabilities": [
+    "completion",
+    "tools"
+   ]
+  }
+ ]
+}

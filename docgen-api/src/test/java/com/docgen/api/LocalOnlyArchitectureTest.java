@@ -50,6 +50,7 @@ class LocalOnlyArchitectureTest {
     private static final String REOPEN_CLIENT_SOURCE = "docgen-api/src/main/java/com/docgen/desktop/ReopenClient.java";
     private static final Set<String> NETWORK_CLIENT_SOURCES = Set.of(
             "docgen-core/src/main/java/com/docgen/OllamaProvider.java",
+            "docgen-core/src/main/java/com/docgen/OllamaClient.java",
             "docgen-core/src/main/java/com/docgen/HttpExchange.java",
             "docgen-core/src/main/java/com/docgen/BoundedUtf8BodySubscriber.java",
             // ADR 0001: a second start of the app asks the running one, on 127.0.0.1, to open a window.
