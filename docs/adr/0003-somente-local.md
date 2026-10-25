@@ -72,7 +72,7 @@ Dois fatos verificados na Fase 0 mudam o desenho:
 
 | Teste | Fase | O que falha o build |
 |---|---|---|
-| `LocalOnlyArchitectureTest` (Java) | 1 | Literal `http://` ou `https://` no código e nos recursos de produção de qualquer módulo que não seja loopback (`127.0.0.1`), salvo uma lista revisada de referências que nunca são buscadas, cada uma com o motivo. Também falha com classes proibidas (`GroqProvider`, `RemoteGate`, `RemoteConsentService`), com implementação de `LLMProvider` diferente da do Ollama e com uso de `HttpClient` ou `URLConnection` fora do cliente Ollama. |
+| `LocalOnlyArchitectureTest` (Java) | 1 | Literal `http://` ou `https://` no código e nos recursos de produção de qualquer módulo que não seja loopback (`127.0.0.1`), salvo uma lista revisada de referências que nunca são buscadas, cada uma com o motivo. Também falha com classes proibidas (`GroqProvider`, `RemoteGate`, `RemoteConsentService`), com implementação de `LLMProvider` diferente da do Ollama e com uso de `HttpClient` ou `URLConnection` fora do cliente Ollama. Desde a Fase 2, a única outra exceção é o `ReopenClient` do launcher (ADR 0001), que só fala com o próprio app em `127.0.0.1`; o teste confere que ele usa o host constante, sem proxy e sem seguir redirecionamentos. |
 | `security.test.mjs` (frontend) | 1 | URL absoluta externa fora da lista de links permitidos, `fetch` para origem absoluta e carregamento de recurso externo (os *sinks* HTML já são checados hoje). |
 | Teste do endpoint do Ollama | 1 | Host diferente de loopback aceito, porta fora da faixa aceita, uso de proxy ou redirecionamento seguido. |
 | Teste de contexto | 1 | Prompt maior que o contexto enviado sem falha ou sem `num_ctx`. |

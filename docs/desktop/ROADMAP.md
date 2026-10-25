@@ -7,7 +7,7 @@
 | Fase | 0: auditoria e plano (sem código de produção) |
 | Data | 2026-10-24 |
 | Branch | `feat/desktop-fase0-auditoria`, criada a partir de `main` (`9d65fc1`) |
-| Estado deste documento | **Aprovado** em 2026-10-24, com as decisões registradas na §9 |
+| Estado deste documento | **Aprovado** em 2026-10-24, com as decisões registradas na §9. Fase 1 concluída; Fase 2 implementada e aguardando aprovação (§11) |
 | Decisões relacionadas | [ADR 0001](../adr/0001-shell-desktop.md), [ADR 0002](../adr/0002-autenticacao-por-token-de-lancamento.md), [ADR 0003](../adr/0003-somente-local.md) |
 
 Legenda de estado usada em todo o documento: **Implementado** (existe em `main` e tem teste), **Em
@@ -454,3 +454,56 @@ Respostas registradas na aprovação da Fase 1:
 - Cookies e portas: RFC 6265, §8.5 ("Weak Confidentiality").
 - Medições locais: `mvn -B clean verify` e `node --test` nas duas branches; sonda de contexto no Ollama
   0.32.11 com `llama3.2:latest` (local, sem download, modelo descarregado em seguida com `keep_alive: 0`).
+
+## 11. Fase 2: resultado (2026-10-24, aguardando aprovação)
+
+Branch: `ccr-97d33570-sr09oz` (a sessão em nuvem desta fase exige essa branch), criada a partir de `main` (`e8cb37f`).
+
+### Linha de base e resultado
+
+Ambiente: Linux x86_64 em contêiner, OpenJDK **21.0.12** (agora com JDK 21 de verdade, como a CI), Maven 3.9.11, Node.js 22.22.
+
+| Medição | `main` (`e8cb37f`) | Fase 2 |
+|---|---:|---:|
+| docgen-core | 189 | 189 |
+| docgen-cli | 16 | 16 |
+| docgen-api (inclui o pacote desktop) | 56 | 120 |
+| **Total Java** (`mvn -B clean verify`) | **261**, `BUILD SUCCESS`, ~50 s | **325**, `BUILD SUCCESS`, ~39 s |
+| Frontend (`node --test`) | 49 | 60 |
+
+Observação de ambiente: sem locale UTF-8 (`LANG` vazio, `sun.jnu.encoding` ASCII), três testes do `RepoScannerTest` falham ao criar arquivos com nomes Unicode. É do ambiente, não do código (passam com `LANG=C.UTF-8`, como na CI). Antes desta fase já era assim.
+
+### Mapeamento dos testes de autenticação (R13)
+
+Nenhum teste de segurança saiu sem substituto.
+
+| Antes | Depois |
+|---|---|
+| `issuesBearerTokensThatAuthenticateAndCanBeRevoked` | `aLaunchTokenBecomesASessionThatAuthenticatesAndCanBeEnded` |
+| `rejectsWrongCredentialsWithoutRevealingWhichPartWasWrong` | `unknownOrMalformedLaunchTokensAreRefusedWithoutDetail` |
+| `throttlesRepeatedFailedSignIns`, `basicAuthenticationSharesTheLockout` | Sem senha não há força bruta de login: `aLaunchTokenWorksOnceAndItsReuseEndsTheSessionItCreated` e `LaunchTokenServiceTest` (256 bits, uso único, 30 s, reuso detectado) |
+| `forgedOrMissingTokensAreRejectedAndTheWebClientGetsABearerChallenge` | `forgedOrMissingTokensAreRejectedWithABearerChallenge` e `ProtectedRoutesTest` (todas as rotas mapeadas) |
+| `basicAuthenticationStillWorksForScripts` | Invertido: `basicAuthenticationIsNotAcceptedAnyMore` |
+| `rejectsForeignHostHeadersToBlockDnsRebinding` | `rejectsForeignHostsAndPortsToBlockDnsRebinding` (mais estrito: exige a porta) |
+| `servesTheWorkspaceWithAStrictContentSecurityPolicy` | `servesTheWorkspaceAndTheLaunchPageWithAStrictContentSecurityPolicy` |
+| `theRemoteProviderCatalogNoLongerExists` | `theRemovedRoutesNoLongerExist` |
+| `projectsAreIsolatedPerUser`, `attachmentsCanBeDeletedOnlyByTheirOwner`, `limitsActiveJobsPerUserAndHidesJobsFromOtherUsers` | Com linhas de outro dono gravadas direto no banco: `rowsOfAnotherOwnerStayInvisibleToTheLocalSession`, `attachmentsOfAnotherOwnerCannotBeReachedOrDeleted`, `limitsActiveJobsAndHidesJobsOfAnotherOwner` |
+| `analysisRequiresValidBasicAuthentication`, `analysisRequiresTheAnalystRole` | `analysisRequiresASession`, `analysisRequiresTheLocalSessionRole` |
+| JS: `login stores the token…` | `a launch token becomes the session…` |
+| Mantidos | Content-Type obrigatório, CORS, rotas negadas sem vazamento |
+
+### Desvios em relação ao plano
+
+| Item do plano | O que foi feito | Por quê |
+|---|---|---|
+| Tokens de lançamento no pacote `com.docgen.desktop` | Em `com.docgen.api.LaunchTokenService`; o launcher implementa `DesktopControl` | Dependência de mão única (desktop → API): a API continua testável sem o launcher. |
+| Hashes consumidos "até expirar" | Guardados por 5 min | Detecta o reuso mesmo quando o navegador legítimo demora mais que 30 s (ADR 0002). |
+| `install-web.sh` perde a exigência de variáveis na F2 | Mantido como está | Ele instala a última release **publicada** (v2.0.0), que ainda exige usuário e senha. Mudá-lo antes de uma release 3.0 quebraria a única versão instalável. Sai na Fase 7. |
+| `DELETE /data` | Implementado, com confirmação digitada na UI e compactação do H2 na saída | Linhas apagadas podem ficar em páginas livres do arquivo (ADR 0001). |
+| Splash nativo (R12) | Não implementado | Depende do empacotamento; fica para a Fase 7. |
+
+### Pendências e riscos desta fase
+
+- Bandeja, `Desktop#browse`, Chromium `--app` e diálogos AWT não foram verificados num desktop real (ambiente *headless*); Windows e macOS também não. Fica para a validação da Fase 7.
+- R2 (token na linha de comando) continua como risco residual declarado, agora com detecção de reuso de 5 min e a recomendação `hidepid=2`.
+- O `CHANGELOG.md` ainda diz que a 2.0.0 "não foi publicada", mas a release v2.0.0 existe no GitHub desde 2026-10-22. Inconsistência anterior a esta fase, não corrigida aqui.

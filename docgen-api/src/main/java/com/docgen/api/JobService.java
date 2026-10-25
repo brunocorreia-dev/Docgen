@@ -78,6 +78,7 @@ class JobService {
     private final Duration timeout;
     private final int maxActivePerUser;
     private final Map<String, Handle> handles = new ConcurrentHashMap<>();
+    private final ActivityTracker activity;
 
     /**
      * Interrupts are delivered only while the worker runs provider code. H2
@@ -95,9 +96,11 @@ class JobService {
             JobRepository jobs,
             TransactionTemplate transactions,
             Clock clock,
-            DocGenApiProperties properties
+            DocGenApiProperties properties,
+            ActivityTracker activity
     ) {
         this.jobs = jobs;
+        this.activity = activity;
         this.transactions = transactions;
         this.clock = clock;
         DocGenApiProperties.Jobs limits = properties.jobs();
@@ -182,12 +185,19 @@ class JobService {
 
     /** Cancels every active job of a project, used before the project is deleted. */
     void cancelProjectJobs(String owner, String projectId) {
-        for (String id : jobs.activeIdsForProject(projectId, owner)) {
+        cancelAll(jobs.activeIdsForProject(projectId, owner), "The project was deleted.");
+    }
+
+    /** Cancels every active job of the owner, used before all data is erased. */
+    void cancelAllJobs(String owner) {
+        cancelAll(jobs.activeIds(owner), "All data was erased.");
+    }
+
+    private void cancelAll(List<String> ids, String reason) {
+        for (String id : ids) {
             Instant now = clock.instant();
-            jobs.finish(id, JobRepository.Status.QUEUED, JobRepository.Status.CANCELLED, "cancelled",
-                    "The project was deleted.", now);
-            jobs.finish(id, JobRepository.Status.RUNNING, JobRepository.Status.CANCELLED, "cancelled",
-                    "The project was deleted.", now);
+            jobs.finish(id, JobRepository.Status.QUEUED, JobRepository.Status.CANCELLED, "cancelled", reason, now);
+            jobs.finish(id, JobRepository.Status.RUNNING, JobRepository.Status.CANCELLED, "cancelled", reason, now);
             interrupt(id);
         }
     }
@@ -229,7 +239,8 @@ class JobService {
 
     private void execute(String jobId, Handle handle, Work work) {
         ScheduledFuture<?> deadline = null;
-        try {
+        // A running generation keeps the desktop app from its idle shutdown.
+        try (ActivityTracker.Activity ignored = activity.begin()) {
             if (!jobs.markRunning(jobId, clock.instant())) {
                 return;
             }

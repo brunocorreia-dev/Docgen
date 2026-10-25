@@ -261,7 +261,7 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
-    void limitsActiveJobsPerUserAndHidesJobsFromOtherUsers() throws Exception {
+    void limitsActiveJobsAndHidesJobsOfAnotherOwner() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");
         CountDownLatch started = new CountDownLatch(2);
@@ -276,10 +276,11 @@ class WorkflowApiTest extends ApiTestSupport {
                     .andExpect(status().isTooManyRequests())
                     .andExpect(jsonPath("$.code").value("too_many_jobs"));
 
-            String intruder = token(OTHER, OTHER_PASSWORD);
-            mvc.perform(authed(get("/api/v1/jobs/" + first), intruder)).andExpect(status().isNotFound());
-            mvc.perform(authed(post("/api/v1/jobs/" + first + "/cancellation"), intruder)
+            String foreignJob = foreignJob(foreignProject());
+            mvc.perform(authed(get("/api/v1/jobs/" + foreignJob), token)).andExpect(status().isNotFound());
+            mvc.perform(authed(post("/api/v1/jobs/" + foreignJob + "/cancellation"), token)
                     .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
+            mvc.perform(authed(get("/api/v1/jobs/" + first), token)).andExpect(status().isOk());
         } finally {
             release.countDown();
         }

@@ -121,15 +121,20 @@ class AttachmentApiTest extends ApiTestSupport {
     }
 
     @Test
-    void attachmentsCanBeDeletedOnlyByTheirOwner() throws Exception {
+    void attachmentsOfAnotherOwnerCannotBeReachedOrDeleted() throws Exception {
         String token = token();
-        String intruder = token(OTHER, OTHER_PASSWORD);
+        String foreignProject = foreignProject();
+        String foreignAttachment = foreignAttachment(foreignProject);
         String project = createProject(token, "ollama");
         String id = json(upload(token, project, TestPdfs.withText("a"), "a.pdf"), 201).path("id").asString();
 
-        mvc.perform(upload(intruder, project, TestPdfs.withText("b"), "b.pdf")).andExpect(status().isNotFound());
-        mvc.perform(authed(delete("/api/v1/projects/" + project + "/attachments/" + id), intruder))
+        mvc.perform(upload(token, foreignProject, TestPdfs.withText("b"), "b.pdf")).andExpect(status().isNotFound());
+        mvc.perform(authed(delete("/api/v1/projects/" + foreignProject + "/attachments/" + foreignAttachment), token))
                 .andExpect(status().isNotFound());
+        mvc.perform(authed(delete("/api/v1/projects/" + project + "/attachments/" + foreignAttachment), token))
+                .andExpect(status().isNotFound());
+        assertEquals(1, jdbc.sql("SELECT COUNT(*) FROM attachments WHERE id = :id").param("id", foreignAttachment)
+                .query(Integer.class).single());
         mvc.perform(authed(delete("/api/v1/projects/" + project + "/attachments/" + id), token))
                 .andExpect(status().isNoContent());
         assertEquals(0, json(authed(get("/api/v1/projects/" + project + "/attachments"), token), 200)

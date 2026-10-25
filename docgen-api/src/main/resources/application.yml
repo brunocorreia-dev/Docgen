@@ -1,7 +1,8 @@
 server:
   # Loopback only. Exposing DocGen on other interfaces is unsupported (see SECURITY.md).
   address: 127.0.0.1
-  port: ${DOCGEN_API_PORT:8080}
+  # Any free port, chosen by the OS at startup; the desktop launcher opens the browser on it.
+  port: 0
   error:
     include-exception: false
     include-message: never
@@ -33,12 +34,9 @@ logging:
     org.apache.fontbox: ERROR
 
 docgen:
-  api:
-    username: ${DOCGEN_API_USERNAME:}
-    password: ${DOCGEN_API_PASSWORD:}
   repositories: {}
   storage:
-    data-directory: ${DOCGEN_DATA_DIR:}
+    # Set by the desktop launcher, which resolves the per-OS data directory (ADR 0001).
     in-memory: false
   ollama:
     # Only the port is configurable; DocGen always talks to Ollama on 127.0.0.1.
@@ -55,5 +53,8 @@ docgen:
     max-per-project: 5
     retention: 30d
   auth:
-    token-ttl: 8h
-    idle-timeout: 30m
+    # Sessions live only in memory; restarting the app ends them all (ADR 0002).
+    idle-timeout: 12h
+  desktop:
+    # The app exits after this long without a window open, never during a download or generation.
+    idle-timeout: 10m

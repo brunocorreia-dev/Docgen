@@ -32,7 +32,8 @@ class LocalOnlyArchitectureTest {
     private static final Set<String> TEXT_EXTENSIONS = Set.of(
             "java", "js", "html", "css", "svg", "json", "yml", "yaml", "properties", "sql", "factories", "txt", "md");
     private static final Pattern URI = Pattern.compile("(?i)https?://[^\\s\"'`<>)\\]]*");
-    private static final Pattern LOOPBACK = Pattern.compile("http://127\\.0\\.0\\.1(?::[0-9]{1,5})?(?:/\\S*)?");
+    /** Loopback, optionally with a port; "{@code http://127.0.0.1:}" alone is a port concatenated at run time. */
+    private static final Pattern LOOPBACK = Pattern.compile("http://127\\.0\\.0\\.1(?::[0-9]{0,5})?(?:/\\S*)?");
 
     /** Identifiers that look like URLs but are never fetched, each with the reason it is safe. */
     private static final Map<String, String> NEVER_FETCHED = Map.of(
@@ -41,15 +42,18 @@ class LocalOnlyArchitectureTest {
     /** The only file that may write a bare scheme: it prefixes the fixed loopback host constant. */
     private static final String ENDPOINT_SOURCE = "docgen-core/src/main/java/com/docgen/OllamaEndpoint.java";
 
-    /** APIs that open connections, allowed only in the Ollama client code. */
+    /** APIs that open connections, allowed only in the Ollama client and the reopen client. */
     private static final List<String> NETWORK_APIS = List.of(
             "java.net.http.HttpClient", "java.net.http.HttpRequest", "HttpURLConnection", "URLConnection",
             "openConnection(", "openStream(", "java.net.Socket;", "new Socket(", "SocketChannel", "DatagramSocket",
             "RestTemplate", "RestClient", "WebClient", "org.apache.http", "okhttp");
+    private static final String REOPEN_CLIENT_SOURCE = "docgen-api/src/main/java/com/docgen/desktop/ReopenClient.java";
     private static final Set<String> NETWORK_CLIENT_SOURCES = Set.of(
             "docgen-core/src/main/java/com/docgen/OllamaProvider.java",
             "docgen-core/src/main/java/com/docgen/HttpExchange.java",
-            "docgen-core/src/main/java/com/docgen/BoundedUtf8BodySubscriber.java");
+            "docgen-core/src/main/java/com/docgen/BoundedUtf8BodySubscriber.java",
+            // ADR 0001: a second start of the app asks the running one, on 127.0.0.1, to open a window.
+            REOPEN_CLIENT_SOURCE);
 
     private static final Pattern IMPLEMENTS_PROVIDER = Pattern.compile("implements\\s+[\\w.,\\s<>]*\\bLLMProvider\\b");
 
@@ -97,6 +101,16 @@ class LocalOnlyArchitectureTest {
             }
         }
         assertTrue(violations.isEmpty(), "Network clients outside the Ollama client (ADR 0003): " + violations);
+    }
+
+    @Test
+    void theReopenClientOnlyTalksToItsOwnLoopbackServer() throws IOException {
+        String source = Files.readString(ROOT.resolve(REOPEN_CLIENT_SOURCE), StandardCharsets.UTF_8);
+
+        assertTrue(source.contains("static final String HOST = \"127.0.0.1\";"), "fixed loopback host");
+        assertTrue(source.contains("new URI(\"http\", null, HOST, port,"), "address built from the constant host");
+        assertTrue(source.contains(".proxy(HttpClient.Builder.NO_PROXY)"), "never through a proxy");
+        assertTrue(source.contains(".followRedirects(HttpClient.Redirect.NEVER)"), "never redirected elsewhere");
     }
 
     @Test

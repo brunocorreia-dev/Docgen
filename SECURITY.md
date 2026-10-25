@@ -45,33 +45,51 @@ Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, t
 
 ### Exposição de rede
 
-- O servidor escuta só em `127.0.0.1` (`server.address`). Expor o DocGen em outras interfaces ou na internet não é suportado.
-- **Defesa contra DNS rebinding:** o `HostHeaderFilter` só atende requisições cujo host seja `localhost`, `127.0.0.1` ou `::1` (configurável em `docgen.api.allowed-hosts`); outros hosts recebem `400 invalid_host`.
+- O servidor escuta só em `127.0.0.1` (`server.address`), numa porta livre escolhida pelo sistema a cada início. Expor o DocGen em outras interfaces ou na internet não é suportado.
+- **Defesa contra DNS rebinding:** o `HostHeaderFilter` só atende requisições cujo `Host` seja exatamente `127.0.0.1:<porta>` ou `localhost:<porta>`, com a porta real do servidor. Outro nome (uma página cujo domínio passou a resolver para `127.0.0.1`), outra porta (uma página servida por outro serviço local) e `::1` (o servidor não escuta em IPv6) recebem `400 invalid_host`.
 - **CORS:** nenhuma origem cruzada é autorizada. Não existe configuração de CORS, preflights de outras origens não recebem `Access-Control-Allow-Origin` e o frontend é servido na mesma origem.
 
-### Autenticação
+### Autenticação (ADR 0002)
 
-- Credenciais definidas pelo operador em `DOCGEN_API_USERNAME` e `DOCGEN_API_PASSWORD` (mínimo de 12 caracteres), codificadas com BCrypt na inicialização. Usuários adicionais só existem para ambientes locais e testes (`docgen.api.additional-users`).
-- **Web:** `POST /api/v1/auth/token` emite um token opaco de 256 bits. O servidor guarda apenas o hash SHA-256, em memória, com expiração absoluta (8 h), por inatividade (30 min) e no máximo 10 tokens por usuário. O navegador guarda o token no `sessionStorage` da aba e o envia em `Authorization: Bearer`. Logout revoga o token, e reiniciar o servidor encerra todas as sessões.
-- **Scripts:** HTTP Basic continua aceito (stateless). Respostas 401 para o workspace (`X-DocGen-Client`) usam o desafio `Bearer`, para que o navegador nunca mostre o diálogo nativo de Basic nem guarde credenciais que possam ser reenviadas automaticamente.
-- **Força bruta:** o `ThrottledAuthenticationManager` aplica o mesmo bloqueio progressivo (30 s, dobrando até 15 min, após 5 falhas) ao Basic e ao endpoint de token, por nome de usuário. A mensagem de falha é a mesma para usuário inexistente e para senha errada.
-- Sem sessão HTTP (`STATELESS`), sem cookies, sem `formLogin`.
+Modelo de ameaça: páginas web abertas no mesmo navegador e outros usuários do mesmo computador estão em escopo; processos do **mesmo** usuário não (eles já leem o diretório de dados e o banco).
 
-### CSRF
+- **Sem contas nem senhas.** Não existe login, HTTP Basic nem `UserDetailsService` (a configuração automática do Spring Boot que geraria uma senha no log está excluída).
+- **Token de lançamento:** a cada janela, o launcher gera 256 bits aleatórios e abre `http://127.0.0.1:<porta>/launch#<token>`. O token é de uso único, vale 30 segundos, fica no servidor só como hash SHA-256 e no máximo 4 ficam pendentes. O fragmento (`#`) nunca vai ao servidor nem ao `Referer`, e a página o apaga da barra de endereços com `history.replaceState` antes de qualquer requisição.
+- **Detecção de reuso:** os hashes consumidos ficam guardados por 5 minutos. Uma segunda troca do mesmo token encerra a sessão criada pela primeira e responde `409 launch_token_reused`. O servidor não sabe qual das duas foi legítima, então encerra ambas: confidencialidade antes de disponibilidade.
+- **Sessão:** a página troca o token por um token de sessão opaco de 256 bits (`POST /api/v1/session`), guardado no servidor só como hash e só em memória: reiniciar o app encerra todas. Termina após 12 horas sem uso (o heartbeat da janela conta como uso); no máximo 8 sessões, e a mais antiga sai. O navegador guarda o token no `sessionStorage` da aba e o envia **apenas** em `Authorization: Bearer`.
+- **Nenhum cookie, em nenhuma rota.** Cookies não são isolados por porta (RFC 6265, §8.5): um cookie de `127.0.0.1` iria para qualquer outro serviço local. `sessionStorage` é isolado por origem (esquema, host e porta) e nunca é anexado automaticamente.
+- **Outro processo local sem o token não usa a API:** todas as rotas mapeadas, exceto `health`, a troca do token de lançamento e a reabertura, respondem `401` sem sessão, com token falso ou com Basic (`ProtectedRoutesTest`, que descobre as rotas sozinho).
+- **Reabertura:** a segunda execução do app lê o `instance.json` (porta, PID e um segredo de 256 bits; arquivo `0600` num diretório `0700`) e chama `POST /api/v1/desktop/reopen` com o segredo num cabeçalho, comparado em tempo constante. Essa rota não usa sessão e recusa qualquer requisição com `Origin` ou `Sec-Fetch-*`, ou seja, vinda de um navegador. Ela só abre uma nova janela, com um token novo, para o usuário do app.
+- Sem sessão HTTP (`STATELESS`), sem `formLogin`. Tokens e o segredo de instância nunca são registrados em log.
 
-O CSRF depende de o navegador anexar credenciais automaticamente. Aqui, nenhuma credencial é ambiente (não há cookies e o Basic nunca é armazenado pelo navegador). Além disso, o `RequestPolicyFilter` exige que todo `POST`, `PUT` ou `PATCH` em `/api/` declare um Content-Type não simples (`application/json`, ou `application/pdf` para upload). Um formulário cross-site não consegue enviar esses tipos sem preflight CORS, que nunca é concedido. Por isso os tokens CSRF baseados em cookie do Spring estão desativados, de forma deliberada e documentada em `SecurityConfig`.
+### CSRF e origem
+
+O CSRF depende de o navegador anexar credenciais automaticamente, e aqui nenhuma credencial é ambiente. Mesmo assim ficam duas defesas em profundidade:
+
+- o `OriginPolicyFilter`, antes da autenticação, recusa com `403 origin_rejected` todo `POST`, `PUT`, `PATCH` ou `DELETE` em `/api/` cujo `Origin` não seja a própria origem do app ou cujo `Sec-Fetch-Site` não seja `same-origin`, quando o navegador os envia;
+- o `RequestPolicyFilter` exige que todo `POST`, `PUT` ou `PATCH` em `/api/` declare um Content-Type não simples (`application/json`, ou `application/pdf` para upload). Um formulário cross-site não consegue enviar esses tipos sem preflight CORS, que nunca é concedido.
+
+Por isso os tokens CSRF baseados em cookie do Spring estão desativados, de forma deliberada e documentada em `SecurityConfig`.
 
 ### Autorização e isolamento
 
-- `/api/v1/**` exige o papel `ANALYST`, exceto `health`, `providers` e `auth/token`. Rotas desconhecidas são negadas (`denyAll`), e só os arquivos estáticos do workspace são públicos.
-- Todo recurso (projeto, anexo, plano, artefato, job) tem `owner`, e toda consulta filtra por `id` e `owner`. Recursos de outro usuário respondem `404`, sem revelar existência. IDs são UUIDs aleatórios validados antes de qualquer consulta.
+- `/api/v1/**` exige uma sessão (papel `LOCAL_SESSION`), exceto `GET health`, `POST session` e `POST desktop/reopen`. Rotas desconhecidas são negadas (`denyAll`), e só os arquivos estáticos do app e a página `/launch` são públicos.
+- O dono dos recursos é fixo (`local`). A coluna `owner` continua em todo recurso (projeto, anexo, plano, artefato, job), e toda consulta segue filtrando por `id` e `owner`, como segunda barreira: linhas de outro dono (por exemplo, de uma migração malfeita) respondem `404`, sem revelar existência. A migração `V3` passa os donos antigos da v2 para `local`. IDs são UUIDs aleatórios validados antes de qualquer consulta.
 - Repositórios do servidor só podem ser analisados por identificadores opacos mapeados pelo operador (`docgen.repositories`), com caminhos absolutos, normalizados e sem symlinks. Clientes nunca enviam caminhos.
+
+### Dados locais e ciclo de vida
+
+- Diretório de dados privado por SO (`0700` onde há POSIX, nunca um link simbólico): `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` no Linux, `~/Library/Application Support/DocGen` no macOS e `%LOCALAPPDATA%\DocGen` no Windows (não `%APPDATA%`, que é copiado para o servidor em perfis móveis de domínio). No Windows a privacidade vem das ACLs herdadas do perfil do usuário.
+- Instância única por trava de arquivo do SO (`instance.lock`), liberada pelo próprio SO se o processo morrer.
+- "Apagar todos os meus dados" cancela as tarefas em andamento, apaga todas as linhas do dono numa transação, esvazia a área de staging e pede um `SHUTDOWN COMPACT` do H2 na saída (ou no próximo início, se o app for morto antes), porque linhas apagadas podem continuar em páginas livres do arquivo. Os logs técnicos são mantidos: eles nunca guardam prompts, respostas, anexos ou tokens.
+- Os dados não são criptografados em repouso; a criptografia de disco é a do sistema operacional.
+- O app se encerra sozinho após 10 minutos sem nenhuma janela aberta (heartbeat da UI), nunca durante uma geração.
 
 ### Validação de entrada e limites
 
 - DTOs separados do domínio, com Bean Validation (tamanhos, padrões, quantidade de itens). A rigidez do JSON é aplicada em código (`StrictJsonConfig`): propriedades desconhecidas, tokens excedentes, chaves duplicadas e `null` em primitivos falham; profundidade máxima de 32 e strings de até 256 KiB. O domínio (`ProjectBrief`) normaliza e limita de novo.
 - Tamanhos de corpo por rota, verificados pelo Content-Length e durante a leitura: 16 KiB (análise), 64 KiB (JSON em geral), 1 MiB (edição de documento) e 10 MiB (PDF).
-- Limites de recursos: 200 projetos por usuário, 5 anexos por projeto, 3 jobs ativos por usuário, fila de 16 jobs, 2 workers, timeout de 15 min por job, 60 s e 200 páginas por PDF.
+- Limites de recursos: 200 projetos, 5 anexos por projeto, 3 jobs ativos, fila de 16 jobs, 2 workers, timeout de 15 min por job, 60 s e 200 páginas por PDF.
 
 ### Upload e processamento de PDF
 
@@ -134,7 +152,8 @@ Abra um security advisory privado ou contate o proprietário do repositório ant
 - **`.docgenignore` não suporta negação.** Os padrões só excluem; uma linha com `!` faz a varredura falhar em vez de ser ignorada em silêncio.
 - **A travessia segura não é portável para todo sistema de arquivos.** Provedores sem `SecureDirectoryStream` falham fechados. Symlinks e renomeações de ancestrais são contidos, mas o Java NIO portátil não distingue hardlink ou bind mount de um inode legítimo dentro da raiz; não analise repositórios graváveis por um usuário local não confiável.
 - **A escrita do par é reversível, não um journal contra quedas.** Sincronizações reduzem perdas, mas uma falha abrupta entre publicações pode deixar um arquivo de recuperação ou um par misto que exige inspeção manual. O NIO portátil também não tem unlink ou chmod condicionais por identidade, não preserva todos os ACLs e xattrs e não se defende de um processo hostil da mesma conta alterando um diretório compartilhado entre as verificações. Use um diretório de saída existente, confiável e não compartilhado; em POSIX, ele não pode ser gravável por grupo ou outros usuários.
-- **A aplicação web é local e de baixa escala.** Sessões e o controle de tentativas ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token web fica no `sessionStorage` da aba, então um XSS poderia lê-lo; a CSP estrita e a ausência de sinks HTML são as mitigações.
+- **O token de lançamento aparece na linha de comando do navegador** até ser trocado. No Linux, outro usuário do mesmo computador pode ler `/proc/<pid>/cmdline` e tentar usá-lo primeiro. Uso único, 30 segundos e a detecção de reuso **detectam e cortam** esse acesso, mas não impedem os segundos entre o roubo e a chegada da página legítima; o mesmo reuso também permite a esse usuário derrubar a sessão legítima. Em computadores compartilhados, montar `/proc` com `hidepid=2` remove essa exposição.
+- **A aplicação é local e de baixa escala.** Sessões ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token de sessão fica no `sessionStorage` da aba, então um XSS ou uma extensão do navegador com acesso à página poderia lê-lo; a CSP estrita, a ausência de sinks HTML e a sessão que morre com o app são as mitigações.
 - **PDFs:** sem OCR; o texto pode sair fora de ordem em layouts complexos; o limite de 200.000 caracteres trunca documentos longos, e isso é sinalizado na interface.
 - **A verificação de assinatura é tão forte quanto o workflow.** A assinatura keyless autentica a identidade do `release.yml` e a tag; a garantia de que os bytes assinados vieram do build depende de revisar esse workflow. Ela não comprova a ausência de código malicioso no repositório naquela tag.
 

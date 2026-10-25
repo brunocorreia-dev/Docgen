@@ -2,10 +2,12 @@
 // messages; the workspace translates the codes it knows.
 
 const ERRORS = {
-  network_error: 'Não foi possível contactar o servidor DocGen. Verifique se a API está em execução.',
-  invalid_credentials: 'Usuário ou senha incorretos.',
-  too_many_attempts: 'Muitas tentativas de acesso. Aguarde alguns instantes e tente novamente.',
-  authentication_required: 'Sua sessão expirou. Entre novamente.',
+  network_error: 'Não foi possível falar com o DocGen. Ele pode ter sido encerrado: abra-o de novo pelo menu ou pelo atalho.',
+  authentication_required: 'Sua sessão terminou. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_invalid: 'Este link de acesso expirou ou já foi usado. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_reused: 'Este link de acesso já tinha sido usado por outro programa. Por segurança, a sessão foi encerrada.',
+  origin_rejected: 'A requisição veio de uma página que não é o DocGen e foi bloqueada.',
+  desktop_unavailable: 'Esta ação só existe no aplicativo DocGen para desktop.',
   access_denied: 'Você não tem permissão para esta ação.',
   invalid_request: 'Os dados enviados são inválidos. Revise os campos destacados.',
   not_found: 'O recurso não foi encontrado.',
@@ -28,7 +30,6 @@ const ERRORS = {
   unsafe_markdown: 'O documento precisa ser Markdown passivo (sem HTML, imagens ou scripts) e começar com um título H1.',
   artifact_read_only: 'Diagramas são gerados a partir do plano e não podem ser editados.',
   nothing_to_export: 'Gere um plano arquitetural antes de exportar.',
-  too_many_sessions: 'Há sessões ativas demais no servidor.',
   invalid_host: 'Endereço de acesso não permitido.',
   internal_error: 'Ocorreu um erro interno. Tente novamente.',
 };

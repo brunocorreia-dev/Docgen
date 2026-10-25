@@ -1,9 +1,7 @@
+server:
+  # MockMvc tests start no server; requests address this port (see LoopbackMockMvc).
+  port: 18080
 docgen:
-  api:
-    username: test-analyst
-    password: test-password-change-me
-    additional-users:
-      other-analyst: other-password-change-me
   repositories: {}
   storage:
     in-memory: true

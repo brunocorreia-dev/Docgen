@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -26,18 +27,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(ApiTestSupport.FakeProviders.class)
+@Import({ApiTestSupport.FakeProviders.class, LoopbackMockMvc.class})
 abstract class ApiTestSupport {
-    static final String USER = "test-analyst";
-    static final String PASSWORD = "test-password-change-me";
-    static final String OTHER = "other-analyst";
-    static final String OTHER_PASSWORD = "other-password-change-me";
-
     @Autowired
     MockMvc mvc;
 
     @Autowired
     JsonMapper mapper;
+
+    @Autowired
+    LaunchTokenService launchTokens;
+
+    @Autowired
+    JdbcClient jdbc;
+
+    /**
+     * There are no accounts any more, but the owner column and the owner
+     * filter in every query stay as a second line of defense (ADR 0002). Rows
+     * of another owner, written straight to the database, must stay invisible
+     * to the local session.
+     */
+    static final String FOREIGN_OWNER = "former-account";
 
     @TestConfiguration
     static class FakeProviders {
@@ -53,21 +63,18 @@ abstract class ApiTestSupport {
         FakeLlm.reset();
     }
 
-    String token(String username, String password) throws Exception {
-        String body = mvc.perform(post("/api/v1/auth/token")
+    /** A session the way the UI gets one: the launcher issues a launch token and the page exchanges it. */
+    String token() throws Exception {
+        String body = mvc.perform(post("/api/v1/session")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
+                        .content("{\"launchToken\":\"" + launchTokens.issue() + "\"}"))
+                .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return mapper.readTree(body).path("accessToken").asString();
     }
 
-    String token() throws Exception {
-        return token(USER, PASSWORD);
-    }
-
     static MockHttpServletRequestBuilder authed(MockHttpServletRequestBuilder builder, String token) {
-        return builder.header("Authorization", "Bearer " + token).header(SecurityConfig.WEB_CLIENT_HEADER, "web");
+        return builder.header("Authorization", "Bearer " + token);
     }
 
     static String projectJson(String name, String provider) {
@@ -90,6 +97,44 @@ abstract class ApiTestSupport {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return mapper.readTree(body).path("id").asString();
+    }
+
+    String foreignProject() {
+        String id = java.util.UUID.randomUUID().toString();
+        jdbc.sql("""
+                        INSERT INTO projects (id, owner, name, description, functional_requirements,
+                                              non_functional_requirements, preferred_technologies, constraints_json,
+                                              provider, model, output_language, created_at, updated_at)
+                        VALUES (:id, :owner, 'Foreign', 'Not yours', '[]', '[]', '[]', '[]', 'ollama', NULL,
+                                'pt-BR', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """)
+                .param("id", id).param("owner", FOREIGN_OWNER).update();
+        return id;
+    }
+
+    String foreignJob(String projectId) {
+        String id = java.util.UUID.randomUUID().toString();
+        jdbc.sql("""
+                        INSERT INTO jobs (id, owner, project_id, type, status, provider, model, created_at, updated_at)
+                        VALUES (:id, :owner, :project, 'ARCHITECTURE_PLAN', 'SUCCEEDED', 'ollama', NULL,
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """)
+                .param("id", id).param("owner", FOREIGN_OWNER).param("project", projectId).update();
+        return id;
+    }
+
+    String foreignAttachment(String projectId) {
+        String id = java.util.UUID.randomUUID().toString();
+        jdbc.sql("""
+                        INSERT INTO attachments (id, project_id, owner, display_name, size_bytes, page_count,
+                                                 character_count, truncated, sha256, extracted_text, created_at,
+                                                 expires_at)
+                        VALUES (:id, :project, :owner, 'foreign.pdf', 1, 1, 1, FALSE, :sha, 'x', CURRENT_TIMESTAMP,
+                                DATEADD('DAY', 1, CURRENT_TIMESTAMP))
+                        """)
+                .param("id", id).param("project", projectId).param("owner", FOREIGN_OWNER)
+                .param("sha", "0".repeat(64)).update();
+        return id;
     }
 
     JsonNode json(MockHttpServletRequestBuilder request, int expectedStatus) throws Exception {

@@ -100,12 +100,25 @@ ProjectBrief + ArchitecturePlan aprovado
 
 ## docgen-api
 
-Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 na camada HTTP), restrita a `127.0.0.1`.
+Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 na camada HTTP), restrita a `127.0.0.1`. É também o app desktop: a classe principal do JAR é `com.docgen.desktop.DesktopLauncher` (ADR [0001](docs/adr/0001-shell-desktop.md)).
+
+### Launcher desktop (`com.docgen.desktop`)
+
+Um processo só, que é o servidor e abre a interface no navegador. O launcher roda **antes** do Spring:
+
+1. `AppDirectories` resolve o diretório de dados por SO (XDG no Linux, `Application Support` no macOS, `%LOCALAPPDATA%` no Windows) e `PrivateFiles` o cria com `0700`, recusando links simbólicos.
+2. `InstanceLock` tenta a trava `instance.lock` (`FileChannel.tryLock`, liberada pelo SO se o processo morrer). Se outra instância a tem, o launcher lê o `instance.json` (`InstanceFile`: porta, PID e segredo, `0600`), pede uma janela nova com `ReopenClient` (`POST /api/v1/desktop/reopen`, loopback, sem proxy, sem redirecionamento) e termina. Sem `instance.json`, a outra instância ainda está subindo e abrirá a própria janela.
+3. Com a trava, apaga um `instance.json` deixado por queda, executa uma compactação do banco pendente (`LocalDatabase`) e sobe o Spring em `127.0.0.1`, porta `0` (o SO escolhe), com o diretório de dados como propriedade de maior precedência e log rotacionado em `<dados>/logs`.
+4. Com o servidor pronto, grava o `instance.json` de forma atômica, instala o ícone de bandeja quando há suporte (`DesktopTray`) e abre `/launch#<token>` com um token de lançamento novo. `SystemBrowsers` tenta um Chromium em modo `--app`, depois `Desktop#browse`, depois `xdg-open`/`open`/`rundll32`, sempre sem shell e com caminho absoluto; se nada abrir, `DesktopNotices` oferece "Copiar link de acesso".
+5. O launcher é o `DesktopControl` do contexto Spring (registrado antes do refresh): a API pede por ele uma janela nova ou o encerramento. O encerramento roda numa thread não daemon, fecha o contexto (e o pool do H2), apaga o `instance.json`, compacta o banco se a remoção de dados pediu, libera a trava e encerra o processo.
+
+A dependência é de mão única: `com.docgen.desktop` usa a API (`DocGenApiApplication`, `LaunchTokenService`, `DesktopControl`, `LocalDatabase`, `PrivateFiles`), e a API não conhece o launcher. Sem ele (testes e desenvolvimento), as rotas desktop respondem que o app não está rodando como desktop.
 
 | Responsabilidade | Classes |
 |---|---|
-| Bootstrap e configuração | `DocGenApiApplication`, `DocGenApiProperties`, `StorageConfig`, `ProviderConfig`, `StrictJsonConfig` |
-| Segurança | `SecurityConfig`, `AuthTokenService`, `BearerTokenAuthenticationFilter`, `ThrottledAuthenticationManager`, `LoginThrottle`, `HostHeaderFilter`, `RequestPolicyFilter`, `CurrentUser` |
+| Bootstrap e configuração | `DocGenApiApplication`, `DocGenApiProperties`, `StorageConfig`, `LocalDatabase`, `PrivateFiles`, `ProviderConfig`, `StrictJsonConfig`, `WebConfig` |
+| Segurança | `SecurityConfig`, `LaunchTokenService`, `SessionTokenService`, `SessionController`, `BearerTokenAuthenticationFilter`, `HostHeaderFilter`, `OriginPolicyFilter`, `LoopbackAuthority`, `RequestPolicyFilter`, `CurrentUser`, `Secrets` |
+| Ciclo de vida desktop | `DesktopControl`, `DesktopController`, `PresenceTracker`, `ActivityTracker`, `IdleShutdownMonitor`, `DataController`, `DataErasureService` |
 | Erros | `ApiExceptionHandler`, `ApiExceptions` (códigos e mensagens fixas) |
 | Projetos | `ProjectController`, `ProjectService`, `ProjectRepository`, `ProjectDtos` |
 | Anexos/PDF | `AttachmentController`, `AttachmentService`, `AttachmentRepository`, `PdfTextExtractor` |
@@ -119,9 +132,12 @@ Aplicação Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Jackson 3 
 | Método e rota | Autenticação | Descrição | Sucesso |
 |---|---|---|---|
 | `GET /health` | pública | Disponibilidade. | 200 |
-| `POST /auth/token` | pública | `{username, password}` → `{accessToken, tokenType, expiresAt, username}`. | 200 |
-| `GET /auth/session` | sim | Usuário da sessão. | 200 |
-| `DELETE /auth/token` | sim | Revoga o token atual. | 204 |
+| `POST /session` | token de lançamento | `{launchToken}` → `{accessToken, tokenType: "Bearer", idleTimeoutSeconds}`. Token inválido ou expirado: `401 launch_token_invalid`; reusado: `409 launch_token_reused` (e a sessão criada com ele termina). Nunca define cookie. | 201 |
+| `GET /session` · `DELETE /session` | sim | Estado da sessão (`{owner: "local", idleTimeoutSeconds}`) e encerramento da sessão atual. | 200 · 204 |
+| `POST /desktop/heartbeat` | sim | A janela está aberta (a cada minuto). | 204 |
+| `POST /desktop/shutdown` | sim | "Sair do DocGen": responde e depois encerra o app. Sem o launcher: `409 desktop_unavailable`. | 202 |
+| `POST /desktop/reopen` | segredo da instância | Só para a segunda execução do app: cabeçalho `X-DocGen-Instance-Secret`; recusa `Origin` e `Sec-Fetch-*` (`403`). | 202 |
+| `DELETE /data` | sim | "Apagar todos os meus dados". | 204 |
 | `POST /repositories/{id}/analysis` | sim | Análise (sem IA) de um repositório autorizado no servidor. | 200 |
 | `POST /projects` · `GET /projects` | sim | Cria ou lista os projetos do usuário (lista com estatísticas). | 201 · 200 |
 | `GET` · `PUT` · `DELETE /projects/{id}` | sim | Detalhe, atualização e exclusão (cancela os jobs do projeto). | 200 · 200 · 204 |
@@ -154,7 +170,7 @@ stateDiagram-v2
     RUNNING --> FAILED: reinício do servidor
 ```
 
-- Pool fixo de workers (`docgen.jobs.workers`, padrão 2), fila limitada (16; fila cheia gera 429), no máximo 3 jobs ativos por usuário e timeout por job (padrão 15 min) controlado por um watchdog.
+- Pool fixo de workers (`docgen.jobs.workers`, padrão 2), fila limitada (16; fila cheia gera 429), no máximo 3 jobs ativos e timeout por job (padrão 15 min) controlado por um watchdog.
 - Na submissão, a API tira um snapshot da entrada exata (o prompt montado na hora) e a thread do worker apenas chama o Ollama local.
 - Toda transição é compare-and-set no banco (`WHERE status = …`). O resultado (plano ou artefatos) é gravado na mesma transação de `RUNNING → SUCCEEDED`, então um job cancelado, expirado ou cujo projeto foi excluído nunca publica resultado.
 - Cancelamento: `QUEUED` sai da fila antes de começar; `RUNNING` interrompe o worker, o que aborta a chamada HTTP ao Ollama (espera interrompível em `HttpExchange`). Interrupções só são entregues enquanto o worker executa código do provedor, nunca durante escrita no H2.
@@ -163,7 +179,7 @@ stateDiagram-v2
 
 ### Persistência
 
-H2 embutido em modo arquivo (`$DOCGEN_DATA_DIR`, padrão `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen`, com permissão `0700`), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas (`db/migration/V1__initial_schema.sql` e `V2__projetos_somente_ollama.sql`, que move para o Ollama os projetos de provedores removidos e mantém o provedor histórico de planos e jobs). Tabelas: `projects`, `attachments`, `plans`, `artifacts` e `jobs`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`.
+H2 embutido em modo arquivo no diretório de dados do launcher (`0700`; por SO, veja acima), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas: `V1__initial_schema.sql`; `V2__projetos_somente_ollama.sql`, que move para o Ollama os projetos de provedores removidos e mantém o provedor histórico de planos e jobs; e `V3__dono_local_fixo.sql`, que passa os donos da v2 para o dono fixo `local`. Tabelas: `projects`, `attachments`, `plans`, `artifacts` e `jobs`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`, como segunda barreira mesmo com um dono só. "Apagar todos os meus dados" pede um `SHUTDOWN COMPACT` (`LocalDatabase`), executado quando nenhum pool está aberto: na saída do app ou no início seguinte.
 
 | Dado | Guardado? | Política |
 |---|---|---|
@@ -193,8 +209,10 @@ Frontend sem framework: HTML5, CSS3 e JavaScript com ES Modules nativos, servido
 
 | Módulo | Responsabilidade |
 |---|---|
-| `js/main.js` | Shell (sidebar, topbar), roteamento por hash e cancelamento de polling ao trocar de tela (`AbortController`). |
-| `js/api.js` | Cliente HTTP: token Bearer em `sessionStorage`, `credentials: 'omit'`, `redirect: 'error'`, `ApiError` com códigos. |
+| `launch.html`, `js/launch.js`, `js/launch-flow.js` | Página `/launch`: lê o token de lançamento do fragmento, apaga o fragmento da barra de endereços antes de qualquer requisição, troca o token pela sessão e vai para `/`; explica em PT-BR quando o link expirou ou foi reusado. |
+| `js/main.js` | Shell (sidebar, topbar), roteamento por hash, cancelamento de polling ao trocar de tela (`AbortController`) e "Sair do DocGen". Sem sessão, mostra como abrir o app pelo atalho; não há tela de login. |
+| `js/heartbeat.js`, `js/views/access.js` | Heartbeat a cada minuto enquanto a janela está aberta (duas falhas de rede seguidas = app encerrado) e as telas fora da shell (sem sessão, link inválido, app encerrado). |
+| `js/api.js` | Cliente HTTP: token de sessão só no `sessionStorage` e só no cabeçalho `Authorization`, `credentials: 'omit'`, `redirect: 'error'`, `ApiError` com códigos. |
 | `js/dom.js`, `js/url.js` | Construção de DOM só com `createElement`/`textContent`/`setAttribute`; allowlist de URLs; nunca `innerHTML`. |
 | `js/markdown.js` | Parser de Markdown próprio → AST → DOM. HTML bruto vira texto, imagens não são carregadas, links passam pela allowlist. |
 | `js/diagram.js` | Layout em camadas (rank por caminho mais longo, quebra de ciclos, ordenação por baricentro) e renderização SVG interativa (zoom, pan, foco por teclado, destaque de conexões, exportação SVG autocontida). |
@@ -206,9 +224,10 @@ O diagrama interativo é desenhado a partir da estrutura do plano, não do texto
 
 ## Fronteiras de segurança
 
-- **Somente local:** o único destino de rede do código Java é o Ollama em `127.0.0.1` (host fixo, porta configurável, sem proxy e sem redirecionamentos). Não existe provedor remoto. `LocalOnlyArchitectureTest` reprova o build se o código de produção de qualquer módulo ganhar uma URI HTTP(S) fora do loopback, outro cliente de rede ou outra implementação de `LLMProvider`. No frontend, a CSP `connect-src 'self'` e os testes estáticos impedem chamadas e recursos externos.
+- **Somente local:** os únicos destinos de rede do código Java são o Ollama em `127.0.0.1` (host fixo, porta configurável, sem proxy e sem redirecionamentos) e, na segunda execução do app, a própria instância já aberta, também em `127.0.0.1`. Não existe provedor remoto. `LocalOnlyArchitectureTest` reprova o build se o código de produção de qualquer módulo ganhar uma URI HTTP(S) fora do loopback, outro cliente de rede ou outra implementação de `LLMProvider`. No frontend, a CSP `connect-src 'self'` e os testes estáticos impedem chamadas e recursos externos.
 - **Dados não confiáveis:** arquivos do repositório, texto do usuário, texto de PDFs e saída do modelo são não confiáveis em todo o pipeline. O endurecimento de prompts reduz o risco de manipulação; a validação de saída (parser do plano, Mermaid restrito, Markdown passivo) limita o que é persistido e exibido. Nada disso prova correção semântica: planos e documentos exigem revisão humana, e a aprovação do plano é um passo explícito antes da documentação.
-- **Isolamento por usuário:** todo recurso é escopado por `owner`; IDs são UUIDs opacos; recursos de outro usuário respondem 404.
+- **Acesso à API local:** só quem recebeu um token de lançamento do launcher (a janela que ele abriu) obtém uma sessão; outros processos e outros usuários do computador recebem `401`, páginas de outras origens recebem `403`, e `Host` estranho recebe `400` (ADR 0002).
+- **Isolamento por dono:** todo recurso é escopado por `owner` (fixo em `local`, mantido como segunda barreira); IDs são UUIDs opacos; recursos de outro dono respondem 404.
 - **Detalhes:** veja [SECURITY.md](SECURITY.md).
 
 ## Decisões arquiteturais
@@ -218,7 +237,8 @@ O diagrama interativo é desenhado a partir da estrutura do plano, não do texto
 | Core em Jackson 2.21; API em Jackson 3.1 (padrão do Spring Boot 4) | Mantém o JAR da CLI e o SBOM inalterados; os pacotes (`com.fasterxml` e `tools.jackson`) convivem sem conflito, compartilhando `jackson-annotations` 2.21. | Duas versões de databind na API. |
 | Rigidez de JSON em código (`StrictJsonConfig`), não só no YAML | Os testes da Fase 02 falharam porque um `application.yml` de teste sobrepunha o principal; segurança não pode depender do arquivo carregado. | — |
 | H2 embutido em vez de SQLite | Puro Java (sem biblioteca nativa), file lock impede duas instâncias no mesmo diretório, suporte nativo no Flyway. | Banco de uso local, não pensado para alta concorrência. |
-| Bearer token opaco em vez de sessão por cookie + token CSRF | Credenciais nunca são anexadas automaticamente pelo navegador; somado à regra de Content-Type e à ausência de CORS, elimina as condições do CSRF. | Token fica no `sessionStorage` da aba (mitigado por CSP estrita e ausência de sinks HTML). |
+| Launcher no mesmo processo, UI no navegador (ADR 0001) | Um processo, sem Electron, Tauri ou JavaFX; reaproveita a SPA atual e o navegador do sistema. | A vida do processo não acompanha a da aba: daí o heartbeat, o desligamento por inatividade e a bandeja opcional. |
+| Token de lançamento de uso único → token de sessão Bearer em `sessionStorage`, sem cookie (ADR 0002) | Sem login nem terminal; cookies não são isolados por porta (RFC 6265, §8.5), e o `sessionStorage` é isolado por origem e nunca anexado automaticamente; somado à regra de Content-Type, à validação de `Origin` e à ausência de CORS, elimina as condições do CSRF. | O token de lançamento aparece por segundos na linha de comando do navegador (detecção de reuso); o token de sessão fica legível para um XSS (mitigado por CSP estrita e ausência de sinks HTML). |
 | PDF como corpo bruto em vez de multipart | Limite exato em stream, sem arquivos temporários do container e sem nome de arquivo em caminho. | Um arquivo por requisição. |
 | Polling HTTP em vez de SSE ou WebSocket | Jobs duram de segundos a minutos; polling é suficiente e mais simples de proteger. | Latência de até 3 s para notar a conclusão. |
 | Renderizador SVG próprio em vez de Mermaid no navegador | Sem execução de diagramas, sem dependência de ~3 MB e compatível com CSP estrita. | Layout mais simples que o do Mermaid. |
@@ -244,6 +264,6 @@ O workflow de release está restrito a `brunocorreia-dev/Docgen`. A varredura e 
 | `docgen-core` | (biblioteca) | Varredura, prompts, provedores, planejamento e validação. |
 | `docgen-cli` | `target/docgen.jar` | CLI shaded (picocli). Instalada por `install.sh`. |
 | `docgen-web` | `docgen-web-<versão>.jar` | Recursos estáticos (`static/`) do workspace. |
-| `docgen-api` | `docgen-api/target/docgen-api.jar` | Spring Boot executável que inclui `docgen-web` em `BOOT-INF/lib` e serve o frontend na mesma origem da API. Instalado por `install-web.sh`. |
+| `docgen-api` | `docgen-api/target/docgen-api.jar` | O app desktop: Spring Boot executável (classe inicial `com.docgen.desktop.DesktopLauncher`) que inclui `docgen-web` em `BOOT-INF/lib` e serve o frontend na mesma origem da API. `java -jar docgen-api.jar` abre o app sem nenhuma configuração. A release publicada (v2.0.0) ainda é instalada por `install-web.sh`. |
 
 O workflow `release.yml` constrói os dois JARs, gera SBOM e checksum de cada um e os assina com Sigstore em um job separado.

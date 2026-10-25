@@ -14,6 +14,10 @@ test('parses every workspace route', () => {
   assert.deepEqual(parseRoute(`#/projects/${ID}/docs/${ARTIFACT}`).params, { tab: 'docs', projectId: ID, artifactId: ARTIFACT });
 });
 
+test('there is no login route any more', () => {
+  assert.equal(parseRoute('#/login').name, 'not-found');
+});
+
 test('rejects unknown or malformed paths', () => {
   assert.equal(parseRoute('#/projects/../../etc').name, 'not-found');
   assert.equal(parseRoute(`#/projects/${ID}/<script>`).name, 'not-found');
