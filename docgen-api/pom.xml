@@ -49,6 +49,12 @@
             <version>${pdfbox.version}</version>
         </dependency>
         <dependency>
+            <!-- CPU, memory, GPU and disk of this computer, read locally (no network). -->
+            <groupId>com.github.oshi</groupId>
+            <artifactId>oshi-core</artifactId>
+            <version>${oshi.version}</version>
+        </dependency>
+        <dependency>
             <!-- Static web workspace served same-origin from classpath:/static. -->
             <groupId>com.docgen</groupId>
             <artifactId>docgen-web</artifactId>

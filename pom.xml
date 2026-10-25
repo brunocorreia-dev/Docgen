@@ -30,6 +30,8 @@
         <maven.shade.version>3.6.2</maven.shade.version>
         <cyclonedx.version>2.9.2</cyclonedx.version>
         <pdfbox.version>3.0.8</pdfbox.version>
+        <!-- MIT. Hardware diagnosis of the desktop app only, so the CLI SBOM does not change. -->
+        <oshi.version>7.7.1</oshi.version>
     </properties>
 
     <dependencyManagement>
