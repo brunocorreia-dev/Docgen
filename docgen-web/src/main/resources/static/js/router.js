@@ -11,6 +11,8 @@ const ROUTES = [
   { name: 'project', pattern: new RegExp(`^/projects/${ID}/docs/${ID}$`), keys: ['projectId', 'artifactId'], extra: { tab: 'docs' } },
   { name: 'documents', pattern: /^\/documents$/ },
   { name: 'settings', pattern: /^\/settings$/ },
+  { name: 'models', pattern: /^\/models$/ },
+  { name: 'onboarding', pattern: /^\/onboarding$/ },
 ];
 
 export function parseRoute(hash) {
@@ -38,6 +40,8 @@ export function href(name, params = {}) {
       return params.tab ? `#/projects/${params.projectId}/${params.tab}` : `#/projects/${params.projectId}`;
     case 'documents': return '#/documents';
     case 'settings': return '#/settings';
+    case 'models': return '#/models';
+    case 'onboarding': return '#/onboarding';
     default: return '#/dashboard';
   }
 }

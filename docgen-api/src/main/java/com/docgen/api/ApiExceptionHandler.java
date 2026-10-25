@@ -90,6 +90,11 @@ final class ApiExceptionHandler {
         return error(HttpStatus.TOO_MANY_REQUESTS, failure.code(), failure.publicMessage());
     }
 
+    @ExceptionHandler(StatusException.class)
+    ResponseEntity<ApiDtos.ErrorResponse> status(StatusException failure) {
+        return error(failure.status(), failure.code(), failure.publicMessage());
+    }
+
     @ExceptionHandler(PayloadTooLargeException.class)
     ResponseEntity<ApiDtos.ErrorResponse> payloadTooLarge() {
         return error(HttpStatus.PAYLOAD_TOO_LARGE, "request_too_large", "The request exceeds the allowed size.");

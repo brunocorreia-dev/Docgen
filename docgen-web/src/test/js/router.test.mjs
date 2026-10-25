@@ -14,6 +14,13 @@ test('parses every workspace route', () => {
   assert.deepEqual(parseRoute(`#/projects/${ID}/docs/${ARTIFACT}`).params, { tab: 'docs', projectId: ID, artifactId: ARTIFACT });
 });
 
+test('the model screens have their own routes', () => {
+  assert.equal(parseRoute('#/models').name, 'models');
+  assert.equal(parseRoute('#/onboarding').name, 'onboarding');
+  assert.equal(parseRoute(href('models')).name, 'models');
+  assert.equal(parseRoute(href('onboarding')).name, 'onboarding');
+});
+
 test('there is no login route any more', () => {
   assert.equal(parseRoute('#/login').name, 'not-found');
 });

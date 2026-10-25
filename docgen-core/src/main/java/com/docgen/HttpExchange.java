@@ -1,7 +1,9 @@
 package com.docgen;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
@@ -47,8 +49,22 @@ final class HttpExchange {
         } catch (ExecutionException failed) {
             exchange.cancel(true);
             Throwable cause = failed.getCause();
+            if (refusedConnection(cause)) {
+                throw new OllamaUnavailableException();
+            }
             String detail = SafeText.forTerminal(cause == null ? null : cause.getMessage());
             throw new IOException(label + " request failed: " + detail);
         }
+    }
+
+    /** A refused or timed-out connection means nothing listens on the port, not that a request failed. */
+    static boolean refusedConnection(Throwable failure) {
+        Throwable cause = failure;
+        for (int depth = 0; cause != null && depth < 8; depth++, cause = cause.getCause()) {
+            if (cause instanceof ConnectException || cause instanceof HttpConnectTimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 }

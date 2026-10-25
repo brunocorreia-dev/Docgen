@@ -64,14 +64,31 @@ test('stylesheets do not import remote resources', () => {
 });
 
 // ADR 0003: the workspace talks only to its own origin. A URL-shaped string is
-// allowed only when it is an identifier that is never requested.
+// allowed only when it is an identifier that is never requested, or one of the
+// official Ollama pages the user may open on purpose (item 6), kept in links.js.
 const NEVER_FETCHED = new Set(['http://www.w3.org/2000/svg']);
+const USER_LINKS = new Set(['https://ollama.com/download', 'https://docs.ollama.com/faq#how-do-i-disable-ollama-cloud-features']);
+const LINKS_MODULE = join(STATIC, 'js', 'links.js');
 
-test('sources contain no absolute URL other than never-fetched identifiers', () => {
+test('sources contain no absolute URL other than never-fetched identifiers and the user links', () => {
   const sources = [...files(join(STATIC, 'js'), '.js'), ...files(STATIC, '.html'), ...files(STATIC, '.svg'), ...files(STATIC, '.css')];
   for (const file of sources) {
     for (const match of readFileSync(file, 'utf8').matchAll(/https?:\/\/[^\s"'`<>)\]]*/gi)) {
-      assert.ok(NEVER_FETCHED.has(match[0]), `${file} references ${match[0]}`);
+      const allowed = NEVER_FETCHED.has(match[0]) || (file === LINKS_MODULE && USER_LINKS.has(match[0]));
+      assert.ok(allowed, `${file} references ${match[0]}`);
+    }
+  }
+});
+
+test('external links open in a new tab without opener or referrer, and nothing fetches them', () => {
+  const source = readFileSync(LINKS_MODULE, 'utf8');
+  assert.match(source, /target: '_blank', rel: 'noopener noreferrer'/);
+  for (const file of files(join(STATIC, 'js'), '.js')) {
+    const text = readFileSync(file, 'utf8');
+    for (const name of ['OLLAMA_DOWNLOAD_URL', 'OLLAMA_LOCAL_ONLY_URL']) {
+      for (const use of text.matchAll(new RegExp(`.{0,40}${name}.{0,10}`, 'g'))) {
+        assert.ok(!/fetch|request\(|src:/.test(use[0]), `${file} fetches ${name}: ${use[0]}`);
+      }
     }
   }
 });

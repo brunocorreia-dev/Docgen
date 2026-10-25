@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Estado | **Aceita** (decisão 4.3 do pedido de realinhamento, com as camadas contra modelos de nuvem e as regras de contexto definidas na aprovação da Fase 0) |
+| Estado | **Aceita e implementada** (decisão 4.3 do pedido de realinhamento, com as camadas contra modelos de nuvem e as regras de contexto definidas na aprovação da Fase 0; remoção na Fase 1, camadas contra modelos de nuvem na Fase 3) |
 | Data | 2026-10-24 |
 | Fase | Proposta na Fase 0; implementação nas Fases 1 (remoção) e 3 (cliente Ollama completo) |
 | Relacionadas | [ADR 0001](0001-shell-desktop.md), [ADR 0002](0002-autenticacao-por-token-de-lancamento.md), [roadmap](../desktop/ROADMAP.md) |
@@ -102,3 +102,32 @@ estruturais acima: um único cliente HTTP, endpoint montado de host constante e 
   DocGen. A UI e a documentação dizem isso com clareza, em vez de prometer o que não depende do DocGen.
 - O padrão `gsk_` do `SecretRedactor` **continua**: ele redige segredos que aparecem nos dados do usuário e
   não é integração com o Groq. Removê-lo enfraqueceria a redação.
+
+## Implementação da Fase 3 (2026-10-25)
+
+Estado: **Implementado**, com testes. Camadas contra modelos que rodam fora do computador:
+
+| Camada | Como ficou | Evidência |
+|---|---|---|
+| 1. Lista de permitidos | O catálogo versionado ([ADR 0004](0004-catalogo-e-recomendacao-de-modelos.md)) é a única fonte de tags para download, teste e modelo padrão. Tags com host (`registro/modelo:tag`) ou `cloud` não entram nele. | `ModelCatalogTest`, `ModelApiTest.onlyCatalogTagsAreEverDownloaded`, `SettingsApiTest` |
+| 2. Rejeição por tag ou metadados | `RemoteModels`: `remote_host` ou `remote_model` preenchidos no `/api/tags`, no `/api/show` ou num pedaço do `/api/chat`, ou tag `cloud`/`*-cloud`. O `OllamaProvider` (CLI e Engenharia) e o `OllamaClient.chat` consultam o `/api/show` antes de enviar qualquer prompt. | `OllamaClientTest`, `OllamaChatTest`, `OllamaProviderSafetyTest` |
+| 3. Verificação | Código do Ollama (`api/types.go`: `RemoteModel`/`RemoteHost` em `ListModelResponse`, `ShowResponse`, `ChatResponse`) e teste empírico no Ollama 0.32.11: um modelo criado com `remote_host` (manifesto local, sem rede) voltou com os dois campos, tamanho de 191 bytes e `details.format` vazio. As respostas reais viraram fixtures (`docgen-core/src/test/resources/ollama`). | `SOURCES.md` das fixtures |
+| 4. Independência da configuração do Ollama | Nada lê `OLLAMA_NO_CLOUD` nem `server.json`. | — |
+| 5. Onboarding | A etapa do Ollama recomenda o modo só local e leva à documentação oficial. | `views/onboarding.js` |
+
+Verificado também no app real, com o JAR e o Ollama 0.32.11: um modelo remoto criado com o nome `qwen3:1.7b` (uma
+tag do catálogo, então a camada 1 não o barra) foi recusado pela camada 2 no teste de inferência e como modelo
+padrão (`422 remote_model_refused`), sem nenhum prompt enviado.
+
+**Download (item 5 da decisão).** O host foi verificado no código do Ollama (`types/model/name.go`: host padrão
+`registry.ollama.ai`, namespace `library`); a janela de confirmação diz isso. O cancelamento foi verificado no
+0.32.11: fechar a conexão do `/api/pull` parou o download (265,4 MB no cancelamento, 267,9 MB oito segundos depois)
+e o pull seguinte retomou do ponto em que parou, como diz a `api.md`. O Ollama manda erros de pull **no meio do
+stream, com HTTP 200**; o cliente os trata.
+
+**Links externos (item 6).** Duas páginas oficiais do Ollama (download e modo só local) ficam só em
+`docgen-web/.../js/links.js`, abertas pelo usuário numa aba nova com `rel="noopener noreferrer"`. Os testes Java e
+JS reprovam qualquer outro endereço externo e o uso dessas constantes para buscar algo.
+
+**Pendente:** o campo de modelo dos projetos da Engenharia ainda aceita qualquer nome (a camada 2 cobre); ele passa
+à lista do catálogo na Fase 6. A CLI continua aceitando qualquer `--model`, também coberta pela camada 2.

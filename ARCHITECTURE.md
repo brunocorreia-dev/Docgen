@@ -8,7 +8,7 @@ docgen/
 ├── docgen-core/       motor reutilizável (Java 21 + Jackson 2)
 ├── docgen-cli/        interface Picocli → target/docgen.jar (shaded)
 ├── docgen-web/        workspace web estático (HTML, CSS, ES Modules) → classpath:/static
-└── docgen-api/        Spring Boot 4.1 (REST, segurança, jobs, H2, PDFBox) → docgen-api.jar
+└── docgen-api/        Spring Boot 4.1 (REST, segurança, jobs, H2, PDFBox, OSHI) → docgen-api.jar
 ```
 
 ```mermaid
@@ -126,6 +126,15 @@ A dependência é de mão única: `com.docgen.desktop` usa a API (`DocGenApiAppl
 | Jobs | `JobController`, `JobService`, `JobRepository`, `JobFailures` |
 | Repositórios autorizados (Fase 02) | `ApiController`, `AuthorizedRepositoryRegistry`, `RepositoryAnalysisService` |
 | Retenção | `RetentionJanitor` |
+| Ollama, modelos e preferências (Fase 3) | `ModelsConfig`, `ModelController`, `ModelService`, `ModelPullService`, `ModelDtos`, `OllamaFailures`, `SettingsController`, `SettingsService`, `AppSettingsRepository` |
+| Diagnóstico de hardware (`com.docgen.hardware`) | `HardwareProbe`, `SystemHardwareProbe` (OSHI), `NvidiaSmi`, `BoundedCommand`, `OllamaModelsDirectory`, `HardwareProfile` |
+| Catálogo e recomendação (`com.docgen.models`) | `ModelCatalog` (`models/qwen-catalog.json`), `CatalogModel`, `ModelRecommender` (puro), `MemoryEstimate`, `ModelFit` |
+
+### Ollama, hardware e modelos (Fase 3)
+
+No core, `OllamaClient` (que implementa `OllamaApi`) é o cliente completo do Ollama local: `version`, `tags`, `show`, `ps`, `delete`, `pull` e `chat` em streaming. `OllamaStream` faz o streaming NDJSON com watchdog de inatividade e prazo total, limites de bytes e linhas e cancelamento por `Cancellation`, que fecha a conexão (é isso que faz o Ollama parar). `RemoteModels` reconhece modelos que rodam fora do computador (`remote_host`, `remote_model`, tag `cloud`), e `ThinkingFilter` separa o raciocínio de modelos Qwen3+ da resposta. O `OllamaProvider` da documentação usa o mesmo `describe` para recusar modelos remotos e pedir `think: false`.
+
+Na API, `SystemHardwareProbe` lê o hardware com OSHI, sem rede, e confirma a VRAM pelo driver (ou pelo `nvidia-smi` opcional). `ModelRecommender` estima a memória de cada modelo do catálogo e o classifica para a máquina (ADR [0004](docs/adr/0004-catalogo-e-recomendacao-de-modelos.md)). `ModelPullService` faz um download por vez, só de tags do catálogo, e marca a atividade para o app não se encerrar no meio.
 
 ### Contratos REST (`/api/v1`)
 
@@ -138,6 +147,15 @@ A dependência é de mão única: `com.docgen.desktop` usa a API (`DocGenApiAppl
 | `POST /desktop/shutdown` | sim | "Sair do DocGen": responde e depois encerra o app. Sem o launcher: `409 desktop_unavailable`. | 202 |
 | `POST /desktop/reopen` | segredo da instância | Só para a segunda execução do app: cabeçalho `X-DocGen-Instance-Secret`; recusa `Origin` e `Sec-Fetch-*` (`403`). | 202 |
 | `DELETE /data` | sim | "Apagar todos os meus dados". | 204 |
+| `GET /ollama/status` | sim | `{reachable, version, address, testedVersion}`; Ollama fora do ar é estado, não erro. | 200 |
+| `GET /hardware` | sim | Diagnóstico (`null` = não detectado) e o status do Ollama. | 200 |
+| `GET /models/catalog` | sim | Catálogo com classe, motivo e estimativa para esta máquina, orçamento e sugestões (geral e código); funciona sem o Ollama. | 200 |
+| `GET /models` | sim | Instalados, com uso de memória do `/api/ps`, se estão no catálogo, se são remotos e se o DocGen pode usá-los. | 200 |
+| `GET /models/details?name=` · `DELETE /models?name=` | sim | Detalhes (`/api/show`) e remoção (`/api/delete`); o nome vai na query porque uma tag pode ter `/`. | 200 · 204 |
+| `POST /models/test` | sim | `{model}`: teste rápido de inferência (só catálogo e local). | 200 |
+| `POST /models/pulls` · `GET /models/pulls` | sim | Inicia o download de uma tag do catálogo (`409 already_installed`, `409 pull_in_progress`, `507 insufficient_disk`) e lista os recentes. | 202 · 200 |
+| `GET` · `DELETE /models/pulls/{id}` | sim | Progresso (etapa, bytes, velocidade) e cancelamento. | 200 · 202 |
+| `GET /settings` · `PUT /settings/default-model` · `PUT /settings/onboarding` | sim | Modelo padrão (tag do catálogo instalada e local) e fim da configuração inicial. | 200 |
 | `POST /repositories/{id}/analysis` | sim | Análise (sem IA) de um repositório autorizado no servidor. | 200 |
 | `POST /projects` · `GET /projects` | sim | Cria ou lista os projetos do usuário (lista com estatísticas). | 201 · 200 |
 | `GET` · `PUT` · `DELETE /projects/{id}` | sim | Detalhe, atualização e exclusão (cancela os jobs do projeto). | 200 · 200 · 204 |
@@ -154,7 +172,7 @@ A dependência é de mão única: `com.docgen.desktop` usa a API (`DocGenApiAppl
 | `GET /projects/{id}/artifacts/{artifactId}/content` | sim | Download com nome fixo. | 200 |
 | `GET /projects/{id}/export?planId=` | sim | ZIP com `README.md`, `ARCHITECTURE.md`, `architecture.mmd` e `architecture-plan.json`. | 200 |
 
-Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `invalid_credentials`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`) e 429 (`too_many_attempts`, `too_many_jobs`, `queue_full`).
+Todos os erros usam o formato `{"status": 409, "code": "plan_not_approved", "message": "…"}`, com códigos estáveis e mensagens fixas: nada vindo de exceções, caminhos ou provedores é ecoado. Códigos HTTP usados: 400 (`invalid_request`, `invalid_host`), 401 (`authentication_required`, `launch_token_invalid`), 403 (`access_denied`), 404 (`not_found`, inclusive para recursos de outro usuário), 409 (`plan_not_approved`, `revision_conflict`, `duplicate_attachment`, `attachment_limit`, `job_not_cancellable`, `artifact_read_only`, `nothing_to_export`), 413 (`request_too_large`), 415 (`unsupported_media_type`), 422 (`pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_many_pages`, `pdf_timeout`, `unsafe_markdown`, `not_in_catalog`, `remote_model_refused`), 429 (`too_many_jobs`, `queue_full`), 502 (`ollama_failed`), 503 (`ollama_unavailable`), 504 (`ollama_timeout`) e 507 (`insufficient_disk`).
 
 ### Jobs assíncronos
 
@@ -179,7 +197,7 @@ stateDiagram-v2
 
 ### Persistência
 
-H2 embutido em modo arquivo no diretório de dados do launcher (`0700`; por SO, veja acima), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas: `V1__initial_schema.sql`; `V2__projetos_somente_ollama.sql`, que move para o Ollama os projetos de provedores removidos e mantém o provedor histórico de planos e jobs; e `V3__dono_local_fixo.sql`, que passa os donos da v2 para o dono fixo `local`. Tabelas: `projects`, `attachments`, `plans`, `artifacts` e `jobs`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`, como segunda barreira mesmo com um dono só. "Apagar todos os meus dados" pede um `SHUTDOWN COMPACT` (`LocalDatabase`), executado quando nenhum pool está aberto: na saída do app ou no início seguinte.
+H2 embutido em modo arquivo no diretório de dados do launcher (`0700`; por SO, veja acima), acesso via `JdbcClient` com SQL explícito e migrações Flyway versionadas: `V1__initial_schema.sql`; `V2__projetos_somente_ollama.sql`, que move para o Ollama os projetos de provedores removidos e mantém o provedor histórico de planos e jobs; `V3__dono_local_fixo.sql`, que passa os donos da v2 para o dono fixo `local`; e `V4__configuracoes_locais.sql`, com as preferências (modelo padrão e fim da configuração inicial). Tabelas: `projects`, `attachments`, `plans`, `artifacts`, `jobs` e `app_settings`. Toda linha tem `owner`, e toda consulta filtra por `id` **e** `owner`, como segunda barreira mesmo com um dono só. "Apagar todos os meus dados" pede um `SHUTDOWN COMPACT` (`LocalDatabase`), executado quando nenhum pool está aberto: na saída do app ou no início seguinte.
 
 | Dado | Guardado? | Política |
 |---|---|---|
@@ -219,12 +237,14 @@ Frontend sem framework: HTML5, CSS3 e JavaScript com ES Modules nativos, servido
 | `js/jobs.js` | Polling com backoff e abort. |
 | `js/validation.js` | Validação de formulário espelhando os limites do servidor. |
 | `js/views/*`, `js/components/*` | Dashboard, projetos, novo projeto, workspace (descrição, anexos, IA, histórico e abas de resultados), documentações, configurações, anexos, plano, diagrama e documentos. |
+| `js/views/onboarding.js`, `js/views/models.js`, `js/components/model-ui.js` | Configuração inicial em sete etapas (abre sozinha enquanto não for concluída) e tela Modelos: status do Ollama, diagnóstico, catálogo classificado, download confirmado com progresso e cancelamento, instalados, teste, padrão e remoção. |
+| `js/models.js`, `js/pulls.js`, `js/links.js` | Funções puras dos modelos (rótulos, progresso, checagem de disco, "não detectado"), acompanhamento do download por polling e os dois únicos links externos (páginas oficiais do Ollama, abertas pelo usuário). |
 
 O diagrama interativo é desenhado a partir da estrutura do plano, não do texto Mermaid. O navegador nunca executa Mermaid, o que elimina essa superfície de execução; o Mermaid validado no servidor é oferecido para cópia e no ZIP.
 
 ## Fronteiras de segurança
 
-- **Somente local:** os únicos destinos de rede do código Java são o Ollama em `127.0.0.1` (host fixo, porta configurável, sem proxy e sem redirecionamentos) e, na segunda execução do app, a própria instância já aberta, também em `127.0.0.1`. Não existe provedor remoto. `LocalOnlyArchitectureTest` reprova o build se o código de produção de qualquer módulo ganhar uma URI HTTP(S) fora do loopback, outro cliente de rede ou outra implementação de `LLMProvider`. No frontend, a CSP `connect-src 'self'` e os testes estáticos impedem chamadas e recursos externos.
+- **Somente local:** os únicos destinos de rede do código Java são o Ollama em `127.0.0.1` (host fixo, porta configurável, sem proxy e sem redirecionamentos) e, na segunda execução do app, a própria instância já aberta, também em `127.0.0.1`. A única saída para a internet é o download de modelo, feito pelo próprio Ollama, de uma tag do catálogo, depois de um clique explícito; modelos que rodam fora do computador são recusados antes de qualquer envio (ADR 0003). Não existe provedor remoto. `LocalOnlyArchitectureTest` reprova o build se o código de produção de qualquer módulo ganhar uma URI HTTP(S) fora do loopback, outro cliente de rede ou outra implementação de `LLMProvider`. No frontend, a CSP `connect-src 'self'` e os testes estáticos impedem chamadas e recursos externos.
 - **Dados não confiáveis:** arquivos do repositório, texto do usuário, texto de PDFs e saída do modelo são não confiáveis em todo o pipeline. O endurecimento de prompts reduz o risco de manipulação; a validação de saída (parser do plano, Mermaid restrito, Markdown passivo) limita o que é persistido e exibido. Nada disso prova correção semântica: planos e documentos exigem revisão humana, e a aprovação do plano é um passo explícito antes da documentação.
 - **Acesso à API local:** só quem recebeu um token de lançamento do launcher (a janela que ele abriu) obtém uma sessão; outros processos e outros usuários do computador recebem `401`, páginas de outras origens recebem `403`, e `Host` estranho recebe `400` (ADR 0002).
 - **Isolamento por dono:** todo recurso é escopado por `owner` (fixo em `local`, mantido como segunda barreira); IDs são UUIDs opacos; recursos de outro dono respondem 404.

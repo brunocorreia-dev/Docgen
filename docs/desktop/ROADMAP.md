@@ -7,7 +7,7 @@
 | Fase | 0: auditoria e plano (sem código de produção) |
 | Data | 2026-10-24 |
 | Branch | `feat/desktop-fase0-auditoria`, criada a partir de `main` (`9d65fc1`) |
-| Estado deste documento | **Aprovado** em 2026-10-24, com as decisões registradas na §9. Fase 1 concluída; Fase 2 implementada e aguardando aprovação (§11) |
+| Estado deste documento | **Aprovado** em 2026-10-24, com as decisões registradas na §9. Fases 1 e 2 concluídas; Fase 3 implementada e aguardando aprovação (§12) |
 | Decisões relacionadas | [ADR 0001](../adr/0001-shell-desktop.md), [ADR 0002](../adr/0002-autenticacao-por-token-de-lancamento.md), [ADR 0003](../adr/0003-somente-local.md) |
 
 Legenda de estado usada em todo o documento: **Implementado** (existe em `main` e tem teste), **Em
@@ -265,12 +265,12 @@ mudar na fase.
 | 2 | `POST /desktop/shutdown` · `POST /desktop/heartbeat` | "Sair do DocGen" pela UI; sinal de presença da UI (ADR 0001). |
 | 2 | `POST /desktop/reopen` | Só para a segunda execução, autenticada pelo segredo de instância (ADR 0001). |
 | 2 | `DELETE /data` | "Apagar todos os meus dados", com confirmação. |
-| 3 | `GET /ollama/status` | Alcançável ou não, versão e porta. |
-| 3 | `GET /hardware` | Diagnóstico; o que não for detectado vem como "não detectado". |
-| 3 | `GET /models/catalog` | Catálogo Qwen com a classificação para esta máquina e o motivo. |
-| 3 | `GET /models` · `GET /models/{nome}` · `GET /models/loaded` | `/api/tags`, `/api/show` e `/api/ps` do Ollama. |
-| 3 | `POST /models/pulls` · `GET /models/pulls/{id}/events` · `DELETE /models/pulls/{id}` | Download (só tags do catálogo), progresso real e cancelamento. |
-| 3 | `DELETE /models/{nome}` · `POST /models/{nome}/test` · `PUT /settings/default-model` | Remover, testar inferência e definir o modelo padrão. |
+| 3 ✔ | `GET /ollama/status` | Alcançável ou não, versão e endereço. **Implementado.** |
+| 3 ✔ | `GET /hardware` | Diagnóstico (`null` = não detectado) e status do Ollama. **Implementado.** |
+| 3 ✔ | `GET /models/catalog` | Catálogo Qwen com classe, motivo, estimativa e sugestões. **Implementado.** |
+| 3 ✔ | `GET /models` · `GET /models/details?name=` | `/api/tags` com o `/api/ps` embutido (a rota `/models/loaded` não foi necessária) e `/api/show`. O nome vai na query porque uma tag pode ter `/`. **Implementado.** |
+| 3 ✔ | `POST /models/pulls` · `GET /models/pulls` · `GET /models/pulls/{id}` · `DELETE /models/pulls/{id}` | Download (só tags do catálogo), progresso real por *polling* do instantâneo (em vez de `…/events`) e cancelamento. **Implementado.** |
+| 3 ✔ | `DELETE /models?name=` · `POST /models/test` · `GET /settings` · `PUT /settings/default-model` · `PUT /settings/onboarding` | Remover, testar inferência, preferências (modelo padrão e fim da configuração inicial). **Implementado.** |
 | 4 | `GET/POST /conversations` (com busca) · `GET/PATCH/DELETE /conversations/{id}` · `GET /conversations/{id}/export` | Conversas e exportação em Markdown. |
 | 4 | `POST /conversations/{id}/messages` (resposta em stream) · `DELETE /conversations/{id}/generations/{gid}` | Geração em streaming e parar de verdade. |
 | 4 | `GET/POST/PUT/DELETE /presets` | *System prompts* editáveis. |
@@ -315,7 +315,7 @@ texto e imagem, 256K), `qwen3` (0.6b a 235b), `qwen3-coder` (30b, 480b), `qwen2.
 O catálogo da Fase 3 inclui as famílias novas (`qwen3.5` etc.) **só com tags verificadas** na fase, com a data
 da verificação e `"verified": true`. O que não puder ser conferido entra com `"verified": false`, e eu aviso.
 
-### 6.3 Catálogo e recomendação (Planejado, Fase 3)
+### 6.3 Catálogo e recomendação (Implementado na Fase 3; detalhes no [ADR 0004](../adr/0004-catalogo-e-recomendacao-de-modelos.md))
 
 - Fonte única: `docgen-api/src/main/resources/models/qwen-catalog.json`, com versão do esquema e data de
   verificação.
@@ -338,6 +338,12 @@ publicado misturado à documentação. Isso vale para a CLI com `--model`, para 
 precisa estar resolvido na primeira fase que oferecer esses modelos (o catálogo da Fase 3). O padrão da CLI,
 `qwen2.5-coder:7b`, não tem modo de raciocínio.
 
+**Implementado na Fase 3:** `think: false` vai só a modelos com a capacidade `thinking` (o Ollama 0.32.11 recusa
+`think: true` nos demais com HTTP 400); o campo `thinking` do Ollama nunca entra no texto; e o `ThinkingFilter`
+tira um bloco `<think>…</think>` inicial escrito pelo próprio modelo, mesmo quebrado entre pedaços do stream. Na
+geração de documentação, o raciocínio é descartado antes do `DocumentationValidator` e do parser do plano; no chat,
+vai para um canal separado (`onThinking`), para a Fase 4 decidir como mostrar.
+
 ### 6.5 `jpackage` do JDK 21 (verificado em 2026-10-24)
 
 Tipos: `app-image`, `exe`, `msi`, `rpm`, `deb`, `pkg`, `dmg`. Cada formato é gerado no próprio SO, sem
@@ -353,8 +359,8 @@ Ficam registrados:
 - **O estimador é calibrado para a família Qwen** (tokenizador Qwen2.5, contagens medidas no Ollama 0.32.11).
   Para outras famílias de modelo, a estimativa é **melhor esforço**; a checagem do `prompt_eval_count` segue
   como segunda barreira.
-- **Fase 3:** classificar `ConnectException` (Ollama fora do ar) como `provider_unavailable`. Hoje o
-  `HttpExchange` embrulha a exceção, e o caso vira `provider_failed`.
+- **Fase 3 (feito):** `ConnectException` (Ollama fora do ar) vira `OllamaUnavailableException` e é classificada
+  como `provider_unavailable`; a CLI explica como abrir o Ollama ou ajustar `--ollama-port`.
 - **Fase 4, chat:** o `num_ctx` deve ser **estável por conversa** e subir só em degraus (4k → 8k → 16k → 32k,
   limitado ao máximo do modelo), porque cada mudança de `num_ctx` faz o Ollama recarregar o modelo. O degrau
   sobe quando o histórico mais a reserva de saída não cabem mais, e o corte de histórico antigo, com aviso
@@ -374,9 +380,9 @@ relatório de fase, e só avança com aprovação.
 | 0 | Este roadmap, três ADRs, linha de base | — | — | — |
 | 1 | Somente local: sem Groq nem fronteira remota; Ollama fixo em loopback; teste de arquitetura; `3.0.0-SNAPSHOT` | 0 | `V2`: projetos com `groq` passam para `ollama` e modelo padrão (planos e jobs mantêm o provedor histórico, só para exibição) | Correção A1 em commit próprio, com teste de regressão do truncamento (P5); modelo padrão `qwen2.5-coder:7b` sem download automático (P6); `vercel.json` → `site/` mínimo (P8). |
 | 2 | Launcher, instância única, porta livre, token de lançamento → Bearer em `sessionStorage`, validação de `Origin`/`Sec-Fetch-Site`, diretórios por SO, apagar dados, log local | 1 | `V3`: `owner` passa a ser a constante `local`, e a coluna é mantida | Heartbeat com desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); `%LOCALAPPDATA%\DocGen` no Windows (P3); sessão com 12 h de inatividade, só em memória; bandeja opcional. |
-| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | — | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4); `ConnectException` passa a ser classificado como `provider_unavailable` (§6.6). |
-| 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V4`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1 e 2 também migram. O `num_ctx` do chat é estável por conversa e sobe em degraus (§6.6). |
-| 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V5`: anexos de conversa | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original; os bytes brutos não ficam salvos (P4). |
+| 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | `V4`: preferências locais (modelo padrão, fim do onboarding) | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4); `ConnectException` passa a ser classificado como `provider_unavailable` (§6.6). |
+| 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V5`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1, 2 e 3 também migram. O `num_ctx` do chat é estável por conversa e sobe em degraus (§6.6). |
+| 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V6`: anexos de conversa | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original; os bytes brutos não ficam salvos (P4). |
 | 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). Orçamento da varredura derivado do contexto do modelo (§6.6). |
 | 7 | Instaladores (`jpackage` + `jlink`) e workflow em matriz | 6 | — | — |
 | 8 | Site estático em `site/` na Vercel | 7 (links dos assets reais) | — | A publicação do app já sai na Fase 1 (P8); aqui o `site/` ganha o conteúdo completo. |
@@ -390,11 +396,11 @@ relatório de fase, e só avança com aprovação.
 | R2 | O token de lançamento aparece na linha de comando do navegador (`/proc/<pid>/cmdline` é legível por outros usuários do Linux por padrão) até ser trocado | Médio: em máquina compartilhada, outro usuário pode tentar usar o token antes do navegador | Uso único, validade curta, detecção de colisão (token já usado → revoga a sessão criada com ele e avisa) (ADR 0002) | 2 |
 | R3 | Um XSS na UI leria o token de sessão no `sessionStorage`. O cookie foi descartado porque cookies não são isolados por porta (RFC 6265, §8.5) | Médio | CSP estrita, nenhum *sink* HTML (com teste que varre o código), Markdown do modelo nunca interpretado como HTML, sessão que morre com o app (ADR 0002) | 2, 4 |
 | R4 | A branch do launcher diverge das decisões e já está publicada | Médio: trabalho duplicado | Decidir P1 antes da Fase 2; reaproveitar o que a seção 4.6 lista | 2 |
-| R5 | Modelos de nuvem do Ollama (A10) | Alto: violaria o princípio 1 | Defesa em camadas (ADR 0003): catálogo como lista de permitidos para baixar e escolher; rejeitar modelo cuja tag ou cujos metadados indiquem execução remota, verificado na documentação e empiricamente; nenhuma dependência da configuração do Ollama do usuário; onboarding que recomenda o modo só local citando a fonte oficial | 3 |
-| R6 | Cancelar o `/api/pull` pode não interromper o download no Ollama | Médio | Testar com o Ollama real na F3, sem afirmar nada antes | 3 |
+| R5 | Modelos de nuvem do Ollama (A10) | Alto: violaria o princípio 1 | Defesa em camadas (ADR 0003): catálogo como lista de permitidos para baixar e escolher; rejeitar modelo cuja tag ou cujos metadados indiquem execução remota, verificado na documentação e empiricamente; nenhuma dependência da configuração do Ollama do usuário; onboarding que recomenda o modo só local citando a fonte oficial. **Mitigado na F3** (ADR 0003, implementação) | 3 |
+| R6 | Cancelar o `/api/pull` pode não interromper o download no Ollama | Médio | Testar com o Ollama real na F3, sem afirmar nada antes. **Verificado na F3:** fechar a conexão para o download, e o pull seguinte retoma | 3 |
 | R7 | O catálogo envelhece rápido (famílias novas a cada poucos meses) e os tamanhos variam por plataforma | Médio | Catálogo versionado com data e `verified`; a UI mostra o tamanho informado pelo Ollama durante o download | 3 |
-| R8 | VRAM livre não é exposta pelo OSHI; sem `nvidia-smi` (AMD, Intel, integradas) a VRAM fica desconhecida; Apple Silicon usa memória unificada | Médio | "Não detectado" em vez de inventar; classificar de forma conservadora quando faltar dado; sondas sem shell e com timeout | 3 |
-| R9 | A estimativa de memória erra (KV cache depende da arquitetura; modelos de visão têm projetor; o Ollama pode quantizar o KV cache) | Médio | Fórmula documentada com folga; comparar com `size`/`size_vram` do `/api/ps` depois de carregar | 3 |
+| R8 | VRAM livre não é exposta pelo OSHI; sem `nvidia-smi` (AMD, Intel, integradas) a VRAM fica desconhecida; Apple Silicon usa memória unificada | Médio | "Não detectado" em vez de inventar; classificar de forma conservadora quando faltar dado; sondas sem shell e com timeout. **F3:** o OSHI 7 lê total e uso pela NVML (NVIDIA) e pelo `amdgpu`; VRAM sem confirmação do driver não entra na conta; Apple Silicon por premissa documentada (não medido) | 3 |
+| R9 | A estimativa de memória erra (KV cache depende da arquitetura; modelos de visão têm projetor; o Ollama pode quantizar o KV cache) | Médio | Fórmula documentada com folga; comparar com `size`/`size_vram` do `/api/ps` depois de carregar. **F3:** calibrada com dois modelos (ADR 0004), 0,3 a 0,8 GB acima da medição; a comparação por modelo carregado fica para a F4 | 3, 4 |
 | R10 | Empacotamento: cada SO gera o próprio instalador; MSI do JDK 21 exige WiX 3; sem certificado, SmartScreen e Gatekeeper alertam; não há notarização da Apple | Médio | Matriz no GitHub Actions; documentação honesta de como prosseguir; disponibilidade do WiX nos runners a verificar na F7 | 7 |
 | R11 | Navegador: o modo `--app` do Chromium e os navegadores em Snap/Flatpak se comportam de jeitos diferentes | Baixo | Tentativa com fallback para o navegador padrão; testar nos três SOs | 2, 7 |
 | R12 | O Spring Boot leva alguns segundos para subir sem nenhuma resposta visual, e o usuário clica de novo | Baixo | Instância única antes do Spring; splash nativo da JVM (`-splash`) avaliado na F2 | 2 |
@@ -402,7 +408,7 @@ relatório de fase, e só avança com aprovação.
 | R14 | Dados locais ficam sem criptografia em repouso (H2 em arquivo) | Baixo | Diretório `0700`; documentar que a criptografia de disco é do SO | 2, 9 |
 | R15 | Ambiente de desenvolvimento sem JDK 21 (só JBR 25 e OpenJDK 27) | Baixo | Build com `--release 21`; a CI com Temurin 21 continua sendo a referência | todas |
 | R16 | Com a UI no navegador, fechar a aba não encerra o processo, e o usuário pode não perceber que o app segue rodando | Médio | Heartbeat da UI e desligamento após 10 min sem sinal, nunca com download ou geração em andamento (P2); ícone de bandeja quando houver suporte | 2 |
-| R17 | Modelos com modo de raciocínio (Qwen3+) misturam o raciocínio à resposta | Médio: documentação poluída ou reprovada pelo validador | Tratamento explícito do raciocínio antes do `DocumentationValidator`, do parser e da tela (§6.4) | 3 |
+| R17 | Modelos com modo de raciocínio (Qwen3+) misturam o raciocínio à resposta | Médio: documentação poluída ou reprovada pelo validador | Tratamento explícito do raciocínio antes do `DocumentationValidator`, do parser e da tela (§6.4). **Feito na F3** | 3 |
 
 ## 9. Decisões tomadas na aprovação da Fase 0 (2026-10-24)
 
@@ -455,7 +461,7 @@ Respostas registradas na aprovação da Fase 1:
 - Medições locais: `mvn -B clean verify` e `node --test` nas duas branches; sonda de contexto no Ollama
   0.32.11 com `llama3.2:latest` (local, sem download, modelo descarregado em seguida com `keep_alive: 0`).
 
-## 11. Fase 2: resultado (2026-10-24, aguardando aprovação)
+## 11. Fase 2: resultado (2026-10-24, aprovada e integrada em `main` pelo PR #23)
 
 Branch: `ccr-97d33570-sr09oz` (a sessão em nuvem desta fase exige essa branch), criada a partir de `main` (`e8cb37f`).
 
@@ -507,3 +513,74 @@ Nenhum teste de segurança saiu sem substituto.
 - Bandeja, `Desktop#browse`, Chromium `--app` e diálogos AWT não foram verificados num desktop real (ambiente *headless*); Windows e macOS também não. Fica para a validação da Fase 7.
 - R2 (token na linha de comando) continua como risco residual declarado, agora com detecção de reuso de 5 min e a recomendação `hidepid=2`.
 - O `CHANGELOG.md` ainda diz que a 2.0.0 "não foi publicada", mas a release v2.0.0 existe no GitHub desde 2026-10-22. Inconsistência anterior a esta fase, não corrigida aqui.
+
+## 12. Fase 3: resultado (2026-10-25, aguardando aprovação)
+
+Branch: `feat/desktop-fase3-ollama-modelos`, criada a partir de `main` (`848ae35`, com a Fase 2).
+
+### Linha de base e resultado
+
+Ambiente: Arch Linux em sandbox Flatpak, JetBrains Runtime 25.0.4 com `--release 21` (sem JDK 21 local; a CI com
+Temurin 21 continua sendo a referência, R15), Maven 3.9.16, Node.js 24.16.0, Ollama 0.32.11, RTX 5070 de 12 GB.
+
+| Medição | `main` (`848ae35`) | Fase 3 |
+|---|---:|---:|
+| docgen-core | 189 | 233 |
+| docgen-cli | 16 | 17 |
+| docgen-api (inclui `desktop`, `hardware` e `models`) | 120 | 169 |
+| **Total Java** (`mvn -B clean verify`) | **325**, `BUILD SUCCESS`, 27 s | **419**, `BUILD SUCCESS`, 32 s |
+| Frontend (`node --test`) | 60 | 80 |
+
+### Verificações feitas antes de implementar
+
+| Item | Fonte | Resultado |
+|---|---|---|
+| Formatos de `/api/chat`, `/api/pull`, `/api/ps`, `/api/show`, `/api/delete`, `/api/version` | `docs/api.md`, docs.ollama.com/api, `api/types.go` e chamadas reais ao 0.32.11 | O pull manda erros **dentro do stream com HTTP 200**; `think: true` em modelo sem raciocínio dá 400; `/api/ps` traz `context_length`. Fixtures em `docgen-core/src/test/resources/ollama`. |
+| Modelos de nuvem | `api/types.go`, `server/create.go`, docs.ollama.com/cloud e teste empírico | `remote_host`/`remote_model` em tags, show e chat; tag `cloud` (ADR 0003). |
+| Cancelamento do pull (R6) | `docs/api.md` ("cancelled pulls are resumed") e teste real com `qwen3:0.6b` | Fechar a conexão para o download; o seguinte retoma. |
+| Host do download | `types/model/name.go` | `registry.ollama.ai`, namespace `library`. |
+| Tags Qwen | Páginas da biblioteca e `config.json` oficiais | 16 tags verificadas (ADR 0004). |
+| Raciocínio | docs.ollama.com/capabilities/thinking e cartões da Qwen | `think` booleano; as `instruct-2507` não raciocinam. |
+| OSHI | Maven Central e código-fonte 7.7.1 | MIT; JNA LGPL-2.1 ou Apache-2.0; VRAM pela NVML e pelo `amdgpu`; sem rede. |
+| Fração da GPU no Apple Silicon | Busca: só relatos de usuários (~75%) | **Não verificado**; premissa de dois terços registrada. |
+
+### Verificação ponta a ponta (JAR real, Ollama 0.32.11, hardware real)
+
+Com um `xdg-open` substituto que só registra o link e o Chromium headless do Playwright dirigido pelo protocolo
+DevTools: o onboarding detectou o Ollama, mostrou o hardware (RTX 5070 com 12 GB e 11 GB livres, medidos pelo
+driver; a pasta de modelos do Ollama não é visível de dentro do sandbox, e a tela disse isso), sugeriu
+`qwen3.5:9b` e `qwen2.5-coder:7b`, retomou e concluiu o download parcial de `qwen3:0.6b`, testou o modelo e o
+definiu como padrão. Nenhum erro de console, nenhuma violação de CSP e nenhuma requisição fora de `127.0.0.1`.
+Pela API, um modelo remoto criado com o nome `qwen3:1.7b` foi recusado (`422 remote_model_refused`); tags fora do
+catálogo e `cloud` também (`422 not_in_catalog`); sem sessão, `401`. Depois, `qwen3:0.6b` e o modelo remoto foram
+removidos pelo próprio DocGen, e o Ollama voltou aos modelos que tinha antes.
+
+Achados desse teste, corrigidos na fase: a velocidade de um download retomado contava o salto do que já estava no
+disco (668 MB/s); e os tokens por segundo da primeira resposta logo após o download (3 tokens/s, contra 530 a 590
+nas seguintes, pela mesma rota) faziam o modelo parecer lento, então o onboarding passou a mostrar o tempo da
+primeira resposta. A causa da primeira resposta lenta não foi investigada.
+
+### Desvios em relação ao plano
+
+| Item do plano | O que foi feito | Por quê |
+|---|---|---|
+| `GET /models/pulls/{id}/events` (stream) | *Polling* do instantâneo a cada 0,7 s | O progresso vem dos eventos do Ollama de qualquer forma; o *polling* sobrevive a recarregar a aba e não antecipa a decisão SSE × NDJSON da Fase 4. |
+| `GET /models/{nome}` e `DELETE /models/{nome}` | Nome na query (`?name=`) | Tags podem ter `/`. |
+| Migração só na Fase 4 | `V4` (`app_settings`) nesta fase | O modelo padrão e o fim do onboarding precisam persistir. Chat e anexos passam a `V5` e `V6`. |
+| `qwen3:4b` e `qwen3:30b` | Substituídas por `qwen3:4b-instruct` e `qwen3:30b-instruct` | As tags padrão são as versões só de raciocínio. |
+| Velocidade em tokens/s por modelo na recomendação | Não há | Nada foi medido por modelo e hardware (ADR 0004). |
+| Projetos sem modelo usam `qwen2.5-coder:7b` | Usam o modelo padrão do app, quando há um | O usuário escolhe um modelo no onboarding; a Engenharia passa a usá-lo. |
+
+### Pendências e riscos desta fase
+
+- Sem JDK 21 local: o cancelamento do stream depende de o `close()` do corpo destravar a leitura, o que foi
+  conferido no código do JDK 21 e testado no JBR 25; a CI confirma no Temurin 21.
+- OSHI no JDK 24+ emite um aviso de acesso nativo da JNA; o pacote da Fase 7 deve passar
+  `--enable-native-access=ALL-UNNAMED`. No JDK 21 não há aviso.
+- Diagnóstico não verificado em Windows, macOS, GPU AMD e Apple Silicon (Fase 7).
+- O campo de modelo dos projetos da Engenharia ainda aceita qualquer nome (a camada 2 cobre); Fase 6.
+- `DesktopLauncherTest` tinha uma corrida da Fase 2 (o teste lia o contador de saídas antes da chamada); corrigida
+  no teste, sem mudar a verificação.
+- O teste de cancelamento real deixou ~478 MB parciais do `qwen3:0.6b` no Ollama, que o teste ponta a ponta concluiu
+  e depois removeu.
+

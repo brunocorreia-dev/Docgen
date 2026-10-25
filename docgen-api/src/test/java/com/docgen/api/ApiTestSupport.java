@@ -49,6 +49,12 @@ abstract class ApiTestSupport {
      */
     static final String FOREIGN_OWNER = "former-account";
 
+    @Autowired
+    FakeOllama ollama;
+
+    @Autowired
+    FakeHardware hardware;
+
     @TestConfiguration
     static class FakeProviders {
         @Bean
@@ -56,11 +62,25 @@ abstract class ApiTestSupport {
         LLMProviderResolver fakeResolver() {
             return FakeLlm.resolver();
         }
+
+        @Bean
+        @Primary
+        FakeOllama fakeOllama() {
+            return new FakeOllama();
+        }
+
+        @Bean
+        @Primary
+        FakeHardware fakeHardware() {
+            return new FakeHardware();
+        }
     }
 
     @BeforeEach
     void resetFake() {
         FakeLlm.reset();
+        ollama.reset();
+        hardware.reset();
     }
 
     /** A session the way the UI gets one: the launcher issues a launch token and the page exchanges it. */
