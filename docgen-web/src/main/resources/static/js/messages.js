@@ -44,6 +44,7 @@ const JOB_ERRORS = {
   provider_unavailable: 'O Ollama não está acessível neste computador. Abra o Ollama e tente novamente.',
   provider_failed: 'A requisição ao Ollama falhou. Tente novamente.',
   model_not_installed: 'O modelo escolhido não está instalado no Ollama. Instale-o pelo Ollama ou escolha outro modelo no projeto. O DocGen não baixa modelos sozinho.',
+  remote_model_refused: 'O modelo escolhido roda fora deste computador (nuvem do Ollama ou outro servidor), então o DocGen se recusou a usá-lo. Escolha um modelo local.',
   prompt_too_large: 'O conteúdo não cabe na janela de contexto do modelo. Reduza a descrição ou os anexos, ou escolha um modelo com contexto maior.',
   prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',

@@ -207,6 +207,19 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
+    void aModelThatRunsOutsideTheComputerIsRefusedWithItsOwnCode() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> {
+            throw new com.docgen.RemoteModelRefusedException("gpt-oss:120b-cloud");
+        });
+
+        JsonNode job = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("remote_model_refused", job.path("error").path("code").asString());
+    }
+
+    @Test
     void modelAndContextFailuresHaveTheirOwnStableCodes() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");

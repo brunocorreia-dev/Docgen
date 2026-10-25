@@ -31,6 +31,13 @@ import java.util.stream.Stream;
  * for the answer, capped at the model's maximum, and a prompt that does not fit
  * fails before anything is sent. {@code num_predict} caps the answer at that
  * reserved room, so generation can never push the prompt out of the window.</p>
+ *
+ * <p>Before anything is sent, {@code /api/show} also has to say the model runs
+ * on this computer ({@link RemoteModels}, ADR 0003). Models that can reason
+ * (Qwen3 and later) are asked not to, and any reasoning that still arrives,
+ * in Ollama's {@code thinking} field or as a leading {@code <think>} block, is
+ * dropped before the text reaches the documentation validator or the plan
+ * parser (ROADMAP §6.4).</p>
  */
 public final class OllamaProvider implements LLMProvider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -38,8 +45,6 @@ public final class OllamaProvider implements LLMProvider {
     static final int MAX_STREAM_FRAGMENT_CHARACTERS = 512 * 1024;
     static final int MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
     static final int MAX_STREAM_LINES = 32_768;
-    static final int MAX_SHOW_RESPONSE_BYTES = 4 * 1024 * 1024;
-    static final int MAX_REPORTED_CONTEXT_TOKENS = 16 * 1024 * 1024;
     /** Context reserved for the answer; also sent as {@code num_predict}. */
     static final int OUTPUT_RESERVE_TOKENS = 8_192;
     /** Windows are rounded up to this step so similar prompts reuse a loaded model instead of reloading it. */
@@ -54,21 +59,19 @@ public final class OllamaProvider implements LLMProvider {
     private final String model;
     private final OllamaEndpoint endpoint;
     private final HttpClient client;
+    private final OllamaClient ollama;
     /** Looked up once: a provider serves a single operation for a single model. */
-    private Integer maximumContextTokens;
+    private ModelDescription description;
 
     public OllamaProvider(String model, OllamaEndpoint endpoint) {
-        this(model, endpoint, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3))
-                .proxy(DirectProxySelector.INSTANCE)
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build());
+        this(model, endpoint, OllamaClient.directClient());
     }
 
     OllamaProvider(String model, OllamaEndpoint endpoint, HttpClient client) {
         this.model = Objects.requireNonNull(model, "model");
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.client = client;
+        this.ollama = new OllamaClient(endpoint, client);
     }
 
     @Override
@@ -90,12 +93,20 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     String buildRequestBody(String prompt, boolean json, int contextTokens) throws IOException {
+        return buildRequestBody(prompt, json, contextTokens, false);
+    }
+
+    String buildRequestBody(String prompt, boolean json, int contextTokens, boolean modelCanThink) throws IOException {
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model", model);
         body.put("prompt", prompt);
         body.put("stream", true);
         if (json) {
             body.put("format", "json");
+        }
+        if (modelCanThink) {
+            // Reasoning would spend the answer budget and is never part of a document.
+            body.put("think", false);
         }
         ObjectNode options = body.putObject("options");
         options.put("num_ctx", contextTokens);
@@ -115,11 +126,12 @@ public final class OllamaProvider implements LLMProvider {
 
     private String generate(String prompt, boolean json) throws Exception {
         int contextTokens = contextWindowFor(prompt, maximumContextTokens(), model);
+        boolean modelCanThink = description().thinking();
 
         HttpRequest request = HttpRequest.newBuilder(endpoint.api("generate"))
                 .timeout(Duration.ofMinutes(10))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(buildRequestBody(prompt, json, contextTokens)))
+                .POST(HttpRequest.BodyPublishers.ofString(buildRequestBody(prompt, json, contextTokens, modelCanThink)))
                 .build();
 
         HttpResponse<String> response = HttpExchange.send(client, request, responseInfo -> {
@@ -134,7 +146,11 @@ public final class OllamaProvider implements LLMProvider {
         }
         Generation generation = parseGeneration(response.body().lines());
         requireWholePromptEvaluated(prompt, generation.promptTokens());
-        return generation.text();
+        String answer = ThinkingFilter.strip(generation.text()).trim();
+        if (answer.isEmpty()) {
+            throw new IOException("Ollama returned an empty response.");
+        }
+        return answer;
     }
 
     /** Defense in depth for a server that ignores {@code num_ctx}; the sizing above is the primary control. */
@@ -153,56 +169,30 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     private int maximumContextTokens() throws IOException, InterruptedException {
-        if (maximumContextTokens == null) {
-            maximumContextTokens = fetchMaximumContextTokens();
+        Integer maximum = description().contextLength();
+        if (maximum == null) {
+            throw new IOException("Ollama did not report the context window of model " + model + ".");
         }
-        return maximumContextTokens;
+        return maximum;
     }
 
-    /** Asks Ollama for the model's maximum context ({@code <architecture>.context_length} in {@code model_info}). */
-    private int fetchMaximumContextTokens() throws IOException, InterruptedException {
-        ObjectNode body = MAPPER.createObjectNode();
-        body.put("model", model);
-        HttpRequest request = HttpRequest.newBuilder(endpoint.api("show"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-                .build();
-        HttpResponse<String> response = HttpExchange.send(client, request, responseInfo -> {
-            int status = responseInfo.statusCode();
-            if (status >= 200 && status < 300) {
-                return BoundedUtf8BodySubscriber.of(MAX_SHOW_RESPONSE_BYTES, "Ollama");
-            }
-            return HttpResponse.BodySubscribers.replacing("");
-        }, Duration.ofSeconds(10), "Ollama");
-        if (response.statusCode() == 404) {
-            throw new ModelNotInstalledException(model);
+    /** {@code /api/show}, once per provider; refuses a model that runs outside this computer. */
+    private ModelDescription description() throws IOException, InterruptedException {
+        if (description == null) {
+            ModelDescription described = ollama.describe(model);
+            RemoteModels.requireLocal(model, described.remote());
+            description = described;
         }
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("Ollama is not responding on " + endpoint + " (HTTP "
-                    + response.statusCode() + ").");
-        }
-        return parseContextLength(response.body(), model);
+        return description;
     }
 
+    /** The model's maximum context ({@code <architecture>.context_length} in {@code model_info}). */
     static int parseContextLength(String showResponse, String model) throws IOException {
-        JsonNode root;
-        try {
-            root = MAPPER.readTree(showResponse);
-        } catch (IOException ignored) {
-            throw new IOException("Ollama returned an invalid model description.");
+        Integer length = OllamaClient.parseDescription(showResponse, model).contextLength();
+        if (length == null) {
+            throw new IOException("Ollama did not report the context window of model " + model + ".");
         }
-        JsonNode info = root == null ? null : root.path("model_info");
-        JsonNode architecture = info == null ? null : info.path("general.architecture");
-        if (architecture != null && architecture.isTextual()
-                && architecture.asText().matches("[A-Za-z0-9_]{1,64}")) {
-            JsonNode length = info.path(architecture.asText() + ".context_length");
-            if (length.isIntegralNumber() && length.canConvertToInt()
-                    && length.asInt() > 0 && length.asInt() <= MAX_REPORTED_CONTEXT_TOKENS) {
-                return length.asInt();
-            }
-        }
-        throw new IOException("Ollama did not report the context window of model " + model + ".");
+        return length;
     }
 
     static String parseStreamingResponse(Stream<String> lines) throws IOException {
@@ -296,6 +286,7 @@ public final class OllamaProvider implements LLMProvider {
         private final StringBuilder output = new StringBuilder();
         private boolean completed;
         private int linesSeen;
+        private long discardedReasoning;
         private Integer promptTokens;
 
         private void acceptLine(String line) throws IOException {
@@ -327,6 +318,17 @@ public final class OllamaProvider implements LLMProvider {
             JsonNode error = node.path("error");
             if (!error.isMissingNode() && !error.isNull()) {
                 throw new IOException("Ollama reported an error.");
+            }
+            JsonNode reasoning = node.path("thinking");
+            if (!reasoning.isMissingNode() && !reasoning.isNull()) {
+                // Discarded, never appended: reasoning is not documentation. It still counts toward the limit.
+                if (!reasoning.isTextual()) {
+                    throw new IOException("Ollama returned a non-text reasoning fragment.");
+                }
+                discardedReasoning += reasoning.asText().length();
+                if (discardedReasoning > DocumentationValidator.MAX_OUTPUT_CHARACTERS) {
+                    throw new IOException("Ollama output exceeded the safety limit.");
+                }
             }
             JsonNode fragment = node.path("response");
             if (!fragment.isMissingNode() && !fragment.isTextual()) {

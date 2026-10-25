@@ -75,6 +75,11 @@ final class FakeOllamaServer implements AutoCloseable {
     FakeOllamaServer stream(String path, List<String> lines, Duration interval, After after) {
         streams.put(path, new Stream(List.copyOf(lines), interval, after));
         clientGone.put(path, new CountDownLatch(1));
+        try {
+            server.removeContext(path);
+        } catch (IllegalArgumentException notRegistered) {
+            // Only the default routes are registered up front.
+        }
         server.createContext(path, this::streamed);
         return this;
     }
