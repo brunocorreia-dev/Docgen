@@ -225,6 +225,12 @@ class ModelPullService {
             stage = progress.stage();
             if (progress.digest() != null) {
                 long[] layer = layers.computeIfAbsent(progress.digest(), digest -> new long[2]);
+                if (layer[1] == 0 && progress.completedBytes() > 0) {
+                    // Ollama first reports a layer without "completed", then jumps to what is already on disk
+                    // when it resumes; measuring across that jump reported 668 MB/s for a resumed pull with
+                    // Ollama 0.32.11. The speed is measured from the first count onwards.
+                    samples.clear();
+                }
                 layer[0] = Math.max(layer[0], progress.totalBytes());
                 layer[1] = Math.max(layer[1], progress.completedBytes());
             }

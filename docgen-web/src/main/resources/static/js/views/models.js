@@ -64,7 +64,7 @@ export async function renderModels(ctx) {
           h('blockquote', { class: 'model-answer' }, result.answer || '(resposta vazia)'),
           h('p', { class: 'muted small' }, [
             result.loadMillis != null ? `Carregou em ${(result.loadMillis / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s` : null,
-            result.tokensPerSecond != null ? `${Math.round(result.tokensPerSecond)} tokens por segundo` : null,
+            result.tokensPerSecond != null ? `${Math.round(result.tokensPerSecond)} tokens por segundo nesta resposta` : null,
           ].filter(Boolean).join(' · '))),
         actions: [{ label: 'Fechar', value: 'close', variant: 'primary' }],
       });

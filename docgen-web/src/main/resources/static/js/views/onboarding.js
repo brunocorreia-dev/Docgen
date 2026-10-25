@@ -199,7 +199,7 @@ export async function renderOnboarding(ctx) {
         show('Funcionou!',
           h('p', { class: 'muted' }, `O ${model.tag} respondeu e passou a ser o seu modelo padrão:`),
           h('blockquote', { class: 'model-answer' }, result.answer || '(resposta vazia)'),
-          result.tokensPerSecond != null ? h('p', { class: 'muted small' }, `Velocidade: cerca de ${Math.round(result.tokensPerSecond)} tokens por segundo.`) : null,
+          result.totalMillis != null ? h('p', { class: 'muted small' }, `Primeira resposta em ${(result.totalMillis / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s, contando o carregamento do modelo. As próximas costumam ser mais rápidas.`) : null,
           nav(button('Concluir', { variant: 'primary', iconName: 'check', onClick: () => go('done') })));
       } catch (failure) {
         show(`Testando ${model.tag}`, h('p', { class: 'form-alert' }, errorMessage(failure)),

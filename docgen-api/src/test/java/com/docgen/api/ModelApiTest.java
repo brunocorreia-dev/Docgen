@@ -257,6 +257,37 @@ class ModelApiTest extends ApiTestSupport {
     }
 
     @Test
+    void aResumedDownloadMeasuresOnlyWhatArrivesNow() throws Exception {
+        String token = token();
+        CountDownLatch measured = new CountDownLatch(1);
+        ollama.pulls((model, listener, cancellation) -> {
+            long total = 1_000_000_000L;
+            // As Ollama 0.32.11 resumed qwen3:0.6b: the layer first without "completed", then what is on disk.
+            listener.onProgress(new com.docgen.PullProgress(com.docgen.PullProgress.Stage.DOWNLOADING, FakeOllama.LAYER,
+                    total, 0));
+            listener.onProgress(new com.docgen.PullProgress(com.docgen.PullProgress.Stage.DOWNLOADING, FakeOllama.LAYER,
+                    total, 900_000_000L));
+            Thread.sleep(700);
+            listener.onProgress(new com.docgen.PullProgress(com.docgen.PullProgress.Stage.DOWNLOADING, FakeOllama.LAYER,
+                    total, 910_000_000L));
+            measured.countDown();
+            while (!cancellation.isCancelled()) {
+                Thread.sleep(10);
+            }
+            throw new java.util.concurrent.CancellationException();
+        });
+        String id = pull(token, "qwen3:8b", 202).path("id").asString();
+        assertTrue(measured.await(5, TimeUnit.SECONDS));
+
+        JsonNode view = json(authed(get("/api/v1/models/pulls/" + id), token), 200);
+
+        long speed = view.path("bytesPerSecond").asLong();
+        assertTrue(speed > 5_000_000 && speed < 20_000_000, "10 MB in about 0.7 s, not the 900 MB already on disk: " + speed);
+        json(authed(delete("/api/v1/models/pulls/" + id), token), 202);
+        awaitPull(token, id);
+    }
+
+    @Test
     void aFailedDownloadSaysWhyWithAStableCode() throws Exception {
         String token = token();
         ollama.pulls((model, listener, cancellation) -> {
