@@ -22,6 +22,8 @@ class OllamaChatTest {
             1024 * 1024, 1L << 20, 1_000, Duration.ofMillis(700), Duration.ofSeconds(20));
     private static final String THINKING_MODEL = "{\"capabilities\":[\"completion\",\"thinking\"],"
             + "\"model_info\":{\"general.architecture\":\"qwen3\",\"qwen3.context_length\":40960}}";
+    private static final String QWEN35_THINKING_MODEL = "{\"capabilities\":[\"completion\",\"thinking\"],"
+            + "\"model_info\":{\"general.architecture\":\"qwen35\",\"qwen35.context_length\":40960}}";
 
     /** Records what a listener receives. */
     static final class Recorder implements OllamaApi.ChatListener {
@@ -89,6 +91,18 @@ class OllamaChatTest {
             JsonNode body = ollama.requestBodies().get(1);
             assertFalse(body.path("think").asBoolean(true), "think=false is sent to a model that can think");
             assertTrue(body.path("keep_alive").isMissingNode());
+        }
+    }
+
+    @Test
+    void qwen35ChatDisablesThinkingInTheRequestBody() throws Exception {
+        try (FakeOllamaServer ollama = new FakeOllamaServer().show("qwen3.5:9b", QWEN35_THINKING_MODEL)
+                .stream("/api/chat", List.of(done("stop")), Duration.ZERO, FakeOllamaServer.After.CLOSE)) {
+            client(ollama).chat(request("qwen3.5:9b", false, null), new Recorder(), new Cancellation());
+
+            JsonNode body = ollama.requestBodies().get(1);
+            assertTrue(body.path("think").isBoolean(), "thinking-capable model gets an explicit flag");
+            assertFalse(body.path("think").asBoolean(), "chat defaults to no reasoning");
         }
     }
 

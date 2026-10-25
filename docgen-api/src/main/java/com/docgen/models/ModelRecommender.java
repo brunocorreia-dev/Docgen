@@ -136,7 +136,8 @@ public final class ModelRecommender {
             long gpuShare = share(total, APPLE_GPU_SHARE);
             long usable = available == null ? gpuShare : Math.min(gpuShare, available);
             notes.add("Mac com Apple Silicon: a GPU usa a mesma memória do sistema (memória unificada). "
-                    + "O DocGen conta com até dois terços dela para a GPU.");
+                    + "O DocGen conta com até dois terços dela para a GPU; essa fração é uma estimativa "
+                    + "não verificada neste Mac, não uma medição.");
             return new Budget(ram, share(usable, HEADROOM), GpuUse.UNIFIED, notes);
         }
         Optional<HardwareProfile.Gpu> best = profile.gpus().stream()

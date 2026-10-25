@@ -7,7 +7,7 @@ import { errorMessage } from '../messages.js';
 import { detected, formatTokens, memorySplit, orderCatalog } from '../models.js';
 import { href } from '../router.js';
 import { badge, button, confirmDialog, errorState, openDialog, skeleton, toast, withBusy } from '../ui.js';
-import { catalogCard, confirmDownload, hardwareSummary, ollamaHelp, ollamaReady, pullProgress } from '../components/model-ui.js';
+import { budgetNotes, catalogCard, confirmDownload, hardwareSummary, ollamaHelp, ollamaReady, pullProgress } from '../components/model-ui.js';
 
 export async function renderModels(ctx) {
   const statusSlot = h('div', { class: 'card-body' }, skeleton(2));
@@ -151,7 +151,7 @@ export async function renderModels(ctx) {
     if (catalog.suggestedGeneral) suggestions[catalog.suggestedGeneral].push('Sugerido para uso geral');
     if (catalog.suggestedCode) suggestions[catalog.suggestedCode].push('Sugerido para código');
     return h('div', null,
-      catalog.budget.notes.map((note) => h('p', { class: 'callout callout-info' }, icon('info'), h('span', null, note))),
+      budgetNotes(catalog.budget),
       h('p', { class: 'muted small' }, `Estimativas para ${formatTokens(catalog.contextTokens)} de contexto. Catálogo verificado em ${catalog.verifiedOn}.`),
       h('div', { class: 'model-grid' }, orderCatalog(catalog).map((model) => catalogCard(model, {
         suggestedFor: suggestions[model.tag] || [],

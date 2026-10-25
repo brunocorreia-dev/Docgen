@@ -4,7 +4,7 @@ import { installFakeDom } from './fake-dom.mjs';
 
 installFakeDom();
 const models = await import('../../main/resources/static/js/models.js');
-const { catalogCard, hardwareSummary } = await import('../../main/resources/static/js/components/model-ui.js');
+const { budgetNotes, catalogCard, hardwareSummary } = await import('../../main/resources/static/js/components/model-ui.js');
 const { externalLink } = await import('../../main/resources/static/js/links.js');
 
 const GIB = 1024 ** 3;
@@ -89,6 +89,14 @@ test('catalog cards show model text only as text nodes', () => {
   assert.ok(card.textContent.includes('Sugerido para uso geral'));
   assert.ok(card.textContent.includes('8,2 bilhões de parâmetros'));
   assert.ok(card.getAttribute('class').includes('fit-recommended'));
+});
+
+test('recommendation caveats are visible as text beside model choices', () => {
+  const [note] = budgetNotes({ notes: ['Apple Silicon: dois terços da memória; estimativa não verificada.'] });
+  assert.equal(note.textContent, 'Apple Silicon: dois terços da memória; estimativa não verificada.');
+  assert.equal(note.getAttribute('class'), 'callout callout-info');
+  assert.ok(note.descendants().some((child) => child.nodeType === 3
+    && child.textContent.includes('estimativa não verificada')));
 });
 
 test('the hardware summary says what was not detected', () => {

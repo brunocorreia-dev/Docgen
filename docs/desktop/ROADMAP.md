@@ -328,6 +328,8 @@ da verificação e `"verified": true`. O que não puder ser conferido entra com 
 - Classes: Recomendado / Funciona com offload / Só CPU / Não recomendado, com o motivo em linguagem simples.
 - Lógica pura e determinística, testada com os perfis do pedido (CPU e 8 GB, GPU de 6 GB, GPU de 12 GB, Apple
   Silicon com 16 GB, máquina com 4 GB).
+- O DocGen oferece downloads somente para tags do catálogo. Na Fase 6, a Engenharia também poderá usar qualquer
+  modelo já instalado que seja local, mesmo fora do catálogo; a recusa de modelos remotos continua obrigatória.
 
 ### 6.4 Modelos com modo de raciocínio (requisito registrado na decisão P6)
 
@@ -375,6 +377,10 @@ Ficam registrados:
 As fases seguem a ordem do pedido. Cada uma termina com `mvn -B verify` e `node --test` verdes e com o
 relatório de fase, e só avança com aprovação.
 
+Regras permanentes do processo: nenhuma ação de rede ou download na máquina do usuário (inclusive consultas a
+registros ou `pull` de modelos) sem autorização prévia. Toda fase atualiza a tabela de status do `README.md`,
+distinguindo Implementado, Em desenvolvimento e Planejado, antes do relatório final.
+
 | Fase | Entrega | Depende de | Migração | Ajuste proposto em relação ao pedido |
 |---|---|---|---|---|
 | 0 | Este roadmap, três ADRs, linha de base | — | — | — |
@@ -383,7 +389,7 @@ relatório de fase, e só avança com aprovação.
 | 3 | Cliente Ollama completo, `HardwareProbe` (OSHI + sondas), catálogo, recomendador, telas de onboarding e Modelos | 2 | `V4`: preferências locais (modelo padrão, fim do onboarding) | Defesa em camadas contra modelos de nuvem (ADR 0003, A10); tratamento do raciocínio dos modelos Qwen3+ (§6.4); `ConnectException` passa a ser classificado como `provider_unavailable` (§6.6). |
 | 4 | Chat com streaming e cancelamento, histórico persistido, presets, nova shell e design system | 3 | `V5`: conversas, mensagens, presets | O pedido chama de "V2"; a numeração muda porque as fases 1, 2 e 3 também migram. O `num_ctx` do chat é estável por conversa e sobe em degraus (§6.6). |
 | 5 | Anexos PDF, `.md` e `.txt` no chat | 4 | `V6`: anexos de conversa | Guardar só o texto extraído, mais nome, tamanho e SHA-256 do original; os bytes brutos não ficam salvos (P4). |
-| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). Orçamento da varredura derivado do contexto do modelo (§6.6). |
+| 6 | Engenharia na sidebar, ligada ao chat | 5 | se precisar | Pasta de repositório autorizada pela UI e revogável: diálogo nativo do processo Java ou caminho digitado e validado pelas regras do `RepoScanner` (P7). Orçamento da varredura derivado do contexto do modelo (§6.6). Uso de qualquer modelo instalado e local, inclusive fora do catálogo; downloads do DocGen continuam restritos ao catálogo (§6.3). |
 | 7 | Instaladores (`jpackage` + `jlink`) e workflow em matriz | 6 | — | — |
 | 8 | Site estático em `site/` na Vercel | 7 (links dos assets reais) | — | A publicação do app já sai na Fase 1 (P8); aqui o `site/` ganha o conteúdo completo. |
 | 9 | Documentação e roteiro E2E manual | 8 | — | — |

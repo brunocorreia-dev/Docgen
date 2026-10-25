@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OllamaProviderSafetyTest {
     private static final String THINKING_MODEL = "{\"capabilities\":[\"completion\",\"thinking\"],"
             + "\"model_info\":{\"general.architecture\":\"qwen3\",\"qwen3.context_length\":40960}}";
+    private static final String QWEN35_THINKING_MODEL = "{\"capabilities\":[\"completion\",\"thinking\"],"
+            + "\"model_info\":{\"general.architecture\":\"qwen35\",\"qwen35.context_length\":40960}}";
 
     @Test
     void aRemoteModelIsRefusedBeforeThePromptIsSent() throws Exception {
@@ -54,6 +56,21 @@ class OllamaProviderSafetyTest {
             new OllamaProvider("qwen2.5-coder:7b", ollama.endpoint()).generateDocumentation("hello");
 
             assertTrue(ollama.generateRequests().getFirst().path("think").isMissingNode());
+        }
+    }
+
+    @Test
+    void qwen35DocumentationAndStructuredGenerationDisableThinking() throws Exception {
+        try (FakeOllamaServer ollama = new FakeOllamaServer().show("qwen3.5:9b", QWEN35_THINKING_MODEL)) {
+            OllamaProvider provider = new OllamaProvider("qwen3.5:9b", ollama.endpoint());
+            provider.generateDocumentation("Gere um README.");
+            provider.generateStructured("Gere um plano.");
+
+            assertEquals(2, ollama.generateRequests().size());
+            for (var body : ollama.generateRequests()) {
+                assertTrue(body.path("think").isBoolean(), "thinking-capable model gets an explicit flag");
+                assertFalse(body.path("think").asBoolean(), "generation defaults to no reasoning");
+            }
         }
     }
 

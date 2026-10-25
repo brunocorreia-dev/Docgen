@@ -27,7 +27,17 @@
 </div>
 
 > [!NOTE]
-> **Em desenvolvimento (3.0.0-SNAPSHOT):** o DocGen está sendo realinhado como um aplicativo desktop de IA local e gratuito, com modelos Qwen via Ollama. Desde esta versão, **todo o processamento é local**: não existe mais provedor remoto. As próximas fases (launcher desktop, chat, gerenciador de modelos e instaladores) ainda estão **planejadas**.
+> **Em desenvolvimento (3.0.0-SNAPSHOT):** o DocGen está sendo realinhado como um aplicativo desktop de IA local e gratuito, com modelos Qwen via Ollama. Desde esta versão, **todo o processamento é local**: não existe mais provedor remoto. O launcher e a configuração de modelos estão implementados; o chat e os instaladores seguem planejados.
+
+| Entrega | Status nesta branch |
+|---|---|
+| Fase 1 · somente Ollama local | ✅ Implementado |
+| Fase 2 · launcher desktop sem login | ✅ Implementado |
+| Fase 3 · onboarding, catálogo e Modelos | ✅ Implementado; aguarda integração em `main` |
+| Fase 4 · chat local | 🗺️ Planejado |
+| Fase 5 · anexos no chat | 🗺️ Planejado |
+| Fase 6 · Engenharia integrada ao chat | 🗺️ Planejado |
+| Fase 7 · instaladores | 🗺️ Planejado |
 
 ---
 
@@ -713,7 +723,7 @@ Histórico recente:
 1. **Fase 01**: extração do `DocumentationService` reutilizável.
 2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
 3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
-4. **3.0.0 (em desenvolvimento)**: realinhamento como app desktop de IA local. Implementado: somente Ollama, sem provedor remoto, com janela de contexto explícita e modelo padrão `qwen2.5-coder:7b` (Fase 1); launcher desktop sem login, com instância única, porta livre, token de lançamento, desligamento por inatividade e "Apagar todos os meus dados" (Fase 2). Planejado: chat com streaming, gerenciador de modelos Qwen, anexos no chat e instaladores.
+4. **3.0.0 (em desenvolvimento)**: realinhamento como app desktop de IA local. Implementado: somente Ollama, sem provedor remoto, com janela de contexto explícita e modelo padrão `qwen2.5-coder:7b` (Fase 1); launcher desktop sem login, com instância única, porta livre, token de lançamento, desligamento por inatividade e "Apagar todos os meus dados" (Fase 2); onboarding, catálogo Qwen e tela Modelos (Fase 3, nesta branch). Planejado: chat com streaming, anexos no chat e instaladores.
 
 Próximos passos considerados (ainda não implementados):
 
