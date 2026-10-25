@@ -79,8 +79,7 @@ public final class SystemHardwareProbe implements HardwareProbe {
         GlobalMemory memory = hardware == null ? null : bounded("memory", hardware::getMemory);
         boolean unified = unifiedMemory();
         List<HardwareProfile.Gpu> gpus = hardware == null ? List.of() : bounded("gpu", () -> gpus(hardware, unified));
-        HardwareProfile.Storage storage = bounded("disk", () -> OllamaModelsDirectory.measure(
-                OllamaModelsDirectory.candidates(platform, environment, home), home));
+        HardwareProfile.Storage storage = modelStorage();
         return new HardwareProfile(
                 os == null ? null : bounded("os name", () -> label(os.getFamily())),
                 os == null ? null : bounded("os version", () -> label(String.valueOf(os.getVersionInfo()))),
@@ -92,7 +91,14 @@ public final class SystemHardwareProbe implements HardwareProbe {
                 memory == null ? null : bounded("ram available", () -> nonNegative(memory.getAvailable())),
                 gpus == null ? List.of() : gpus,
                 unified,
-                storage == null ? new HardwareProfile.Storage(null, null, false) : storage);
+                storage);
+    }
+
+    @Override
+    public HardwareProfile.Storage modelStorage() {
+        HardwareProfile.Storage storage = bounded("disk", () -> OllamaModelsDirectory.measure(
+                OllamaModelsDirectory.candidates(platform, environment, home), home));
+        return storage == null ? new HardwareProfile.Storage(null, null, false) : storage;
     }
 
     private SystemInfo systemInfo() {

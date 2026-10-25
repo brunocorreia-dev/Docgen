@@ -21,7 +21,7 @@ public final class ModelPullException extends IOException {
 
     private final Reason reason;
 
-    ModelPullException(Reason reason) {
+    public ModelPullException(Reason reason) {
         super(switch (reason) {
             case NOT_FOUND -> "The Ollama library has no model with this name.";
             case REGISTRY_UNREACHABLE -> "Ollama could not reach its model library. Check the internet connection.";

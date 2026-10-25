@@ -16,13 +16,14 @@ import java.io.UncheckedIOException;
  * rows do not linger in free pages of the file.
  *
  * <p>Logs are not user content (they never hold prompts, answers, attachments
- * or tokens) and are kept; the UI says so.</p>
+ * or tokens) and are kept; the UI says so. Downloaded models belong to Ollama,
+ * not to DocGen, and are removed in the model manager.</p>
  */
 @Service
 class DataErasureService {
     private static final Logger LOG = LoggerFactory.getLogger(DataErasureService.class);
     /** Children before parents, although the foreign keys also cascade from projects. */
-    private static final String[] TABLES = {"artifacts", "plans", "attachments", "jobs", "projects"};
+    private static final String[] TABLES = {"artifacts", "plans", "attachments", "jobs", "projects", "app_settings"};
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;

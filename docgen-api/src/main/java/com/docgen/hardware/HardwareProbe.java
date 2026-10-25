@@ -4,4 +4,9 @@ package com.docgen.hardware;
 @FunctionalInterface
 public interface HardwareProbe {
     HardwareProfile probe();
+
+    /** Only the disk where Ollama keeps models, checked right before a download. */
+    default HardwareProfile.Storage modelStorage() {
+        return probe().modelStorage();
+    }
 }
