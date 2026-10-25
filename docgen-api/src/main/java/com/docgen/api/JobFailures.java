@@ -2,6 +2,7 @@ package com.docgen.api;
 
 import com.docgen.ArchitecturePlanParser;
 import com.docgen.ModelNotInstalledException;
+import com.docgen.OllamaUnavailableException;
 import com.docgen.PromptTooLargeException;
 import com.docgen.PromptTruncatedException;
 import com.docgen.UnsafeOutputException;
@@ -54,11 +55,12 @@ final class JobFailures {
         if (failure instanceof PromptTruncatedException) {
             return new Failure("prompt_truncated", "Ollama dropped part of the input, so the result was discarded.");
         }
+        if (failure instanceof OllamaUnavailableException || failure instanceof ConnectException
+                || message.contains("is not responding")) {
+            return new Failure("provider_unavailable", "Ollama is not reachable on this computer.");
+        }
         if (failure instanceof HttpTimeoutException) {
             return new Failure("provider_timeout", "Ollama did not answer in time.");
-        }
-        if (failure instanceof ConnectException || message.contains("is not responding")) {
-            return new Failure("provider_unavailable", "Ollama is not reachable on this computer.");
         }
         if (failure instanceof IOException && message.startsWith("Ollama")) {
             return new Failure("provider_failed", "The Ollama request failed.");

@@ -116,6 +116,21 @@ class DocGenCLITest {
     }
 
     @Test
+    void ollamaThatIsNotRunningIsExplainedWithoutAStackTrace() throws Exception {
+        Files.writeString(repo.resolve("App.java"), "class App {}");
+        DocumentationService service = new DocumentationService(model -> failingCheck(new OllamaUnavailableException()));
+
+        int exitCode = new CommandLine(new DocGenCLI(service)).execute("-o", out.toString(), repo.toString());
+
+        assertEquals(1, exitCode);
+        String error = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(error.contains("Ollama is not reachable"), error);
+        assertTrue(error.contains("--ollama-port"), error);
+        assertFalse(error.contains("at com.docgen"), "no stack trace: " + error);
+        assertFalse(Files.exists(out.resolve("README.md")));
+    }
+
+    @Test
     void aPromptTooLargeForTheModelExplainsHowToNarrowTheInput() throws Exception {
         Files.writeString(repo.resolve("App.java"), "class App {}");
         DocumentationService service = new DocumentationService(model -> failingCheck(
