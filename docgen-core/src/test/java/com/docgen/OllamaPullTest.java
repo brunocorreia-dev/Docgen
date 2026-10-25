@@ -168,13 +168,13 @@ class OllamaPullTest {
     @Test
     void ollamaThatIsNotRunningIsUnavailable() throws Exception {
         OllamaClient client = new OllamaClient(new OllamaEndpoint(OllamaUnavailableTest.closedPort()),
-                OllamaClient.directClient(), FAST);
+                OllamaClient.directClient(), FAST, FAST);
 
         assertThrows(OllamaUnavailableException.class,
                 () -> client.pull("qwen3:0.6b", progress -> { }, new Cancellation()));
     }
 
     private static OllamaClient client(FakeOllamaServer ollama) {
-        return new OllamaClient(ollama.endpoint(), OllamaClient.directClient(), FAST);
+        return new OllamaClient(ollama.endpoint(), OllamaClient.directClient(), FAST, FAST);
     }
 }

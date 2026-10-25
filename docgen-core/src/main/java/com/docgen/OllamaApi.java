@@ -37,4 +37,24 @@ public interface OllamaApi {
     interface PullListener {
         void onProgress(PullProgress progress);
     }
+
+    /**
+     * {@code POST /api/chat} with streaming. Before anything is sent, the model
+     * is looked up and refused if it runs outside this computer
+     * ({@link RemoteModelRefusedException}). The answer arrives in pieces;
+     * reasoning, whether Ollama separates it or the model writes it inline,
+     * goes only to {@link ChatListener#onThinking}. Cancelling closes the
+     * connection, which stops the generation, and throws
+     * {@link java.util.concurrent.CancellationException}.
+     */
+    ChatOutcome chat(ChatRequest request, ChatListener listener, Cancellation cancellation)
+            throws IOException, InterruptedException;
+
+    interface ChatListener {
+        void onContent(String text);
+
+        /** Reasoning of models that think before answering; never part of the answer. */
+        default void onThinking(String text) {
+        }
+    }
 }

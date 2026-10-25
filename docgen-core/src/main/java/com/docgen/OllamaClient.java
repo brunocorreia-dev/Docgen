@@ -38,20 +38,23 @@ public final class OllamaClient implements OllamaApi {
     private final OllamaEndpoint endpoint;
     private final HttpClient client;
     private final OllamaStream.Limits pullLimits;
+    private final OllamaStream.Limits chatLimits;
 
     public OllamaClient(OllamaEndpoint endpoint) {
-        this(endpoint, directClient(), PULL_LIMITS);
+        this(endpoint, directClient(), PULL_LIMITS, CHAT_LIMITS);
     }
 
     OllamaClient(OllamaEndpoint endpoint, HttpClient client) {
-        this(endpoint, client, PULL_LIMITS);
+        this(endpoint, client, PULL_LIMITS, CHAT_LIMITS);
     }
 
     /** Tests shorten the stream limits; production uses the constants below. */
-    OllamaClient(OllamaEndpoint endpoint, HttpClient client, OllamaStream.Limits pullLimits) {
+    OllamaClient(OllamaEndpoint endpoint, HttpClient client, OllamaStream.Limits pullLimits,
+                 OllamaStream.Limits chatLimits) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.client = Objects.requireNonNull(client, "client");
         this.pullLimits = Objects.requireNonNull(pullLimits, "pullLimits");
+        this.chatLimits = Objects.requireNonNull(chatLimits, "chatLimits");
     }
 
     /** The only way DocGen builds an HTTP client for Ollama: short connect timeout, no proxy, no redirects. */
@@ -172,6 +175,143 @@ public final class OllamaClient implements OllamaApi {
             throw new IOException("Ollama returned an invalid download progress.");
         }
         return value.asLong();
+    }
+
+    @Override
+    public ChatOutcome chat(ChatRequest request, ChatListener listener, Cancellation cancellation)
+            throws IOException, InterruptedException {
+        Objects.requireNonNull(listener, "listener");
+        ModelDescription model = describe(request.model());
+        RemoteModels.requireLocal(model.name(), model.remote());
+        HttpRequest http = HttpRequest.newBuilder(endpoint.api("chat"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(chatBody(request, model.thinking())))
+                .build();
+        ChatReader reader = new ChatReader(request.model(), listener);
+        OllamaStream.exchange(client, http, chatLimits, cancellation, status -> status == 404
+                ? new ModelNotInstalledException(request.model())
+                : new IOException("Ollama answered chat with HTTP " + status + "."), reader::accept);
+        return reader.outcome();
+    }
+
+    /**
+     * Loading a large model from disk can take minutes before the first piece
+     * of the answer, which is also when Ollama sends the response headers.
+     */
+    static final OllamaStream.Limits CHAT_LIMITS = new OllamaStream.Limits(
+            1024 * 1024, 64L * 1024 * 1024, 1_000_000, Duration.ofMinutes(10), Duration.ofHours(1));
+    /** Answer plus reasoning; generous next to any {@code num_predict} DocGen sends. */
+    static final int MAX_CHAT_OUTPUT_CHARACTERS = 4_000_000;
+
+    static String chatBody(ChatRequest request, boolean modelCanThink) throws IOException {
+        ObjectNode body = OllamaJson.MAPPER.createObjectNode();
+        body.put("model", request.model());
+        var messages = body.putArray("messages");
+        for (ChatMessage message : request.messages()) {
+            messages.addObject().put("role", message.role().wireName()).put("content", message.content());
+        }
+        body.put("stream", true);
+        if (modelCanThink) {
+            // Sent only to models that can think: Ollama 0.32.11 rejects think=true for others with HTTP 400.
+            body.put("think", request.thinking());
+        }
+        if (request.keepAlive() != null) {
+            body.put("keep_alive", request.keepAlive());
+        }
+        ObjectNode options = body.putObject("options");
+        options.put("num_ctx", request.contextTokens());
+        options.put("num_predict", request.maxOutputTokens());
+        return OllamaJson.MAPPER.writeValueAsString(body);
+    }
+
+    /** Reads the {@code /api/chat} chunks of one reply. */
+    private static final class ChatReader {
+        private final String model;
+        private final ChatListener listener;
+        private final ThinkingFilter filter;
+        private long characters;
+        private ChatOutcome outcome;
+
+        ChatReader(String model, ChatListener listener) {
+            this.model = model;
+            this.listener = listener;
+            this.filter = new ThinkingFilter(new ThinkingFilter.Sink() {
+                @Override
+                public void answer(String text) {
+                    listener.onContent(text);
+                }
+
+                @Override
+                public void reasoning(String text) {
+                    listener.onThinking(text);
+                }
+            });
+        }
+
+        boolean accept(JsonNode line) throws IOException {
+            JsonNode error = line.path("error");
+            if (!error.isMissingNode() && !error.isNull()) {
+                throw new IOException("Ollama reported an error while answering.");
+            }
+            if (RemoteModels.declaresRemote(line)) {
+                // The lookup before sending said local; a chunk that says otherwise ends the reply at once.
+                throw new RemoteModelRefusedException(model);
+            }
+            JsonNode message = line.path("message");
+            if (!message.isMissingNode() && !message.isObject()) {
+                throw new IOException("Ollama returned an invalid chat message.");
+            }
+            String thinking = piece(message, "thinking");
+            if (!thinking.isEmpty()) {
+                listener.onThinking(thinking);
+            }
+            filter.accept(piece(message, "content"));
+            JsonNode done = line.path("done");
+            if (!done.isMissingNode() && !done.isBoolean()) {
+                throw new IOException("Ollama returned an invalid completion marker.");
+            }
+            if (!done.asBoolean(false)) {
+                return false;
+            }
+            JsonNode reason = line.path("done_reason");
+            if (!reason.isTextual() || !("stop".equals(reason.asText()) || "length".equals(reason.asText()))) {
+                throw new IOException("Ollama reply was incomplete.");
+            }
+            filter.finish();
+            outcome = new ChatOutcome(reason.asText(),
+                    OllamaJson.boundedInt(line.path("prompt_eval_count"), 0, Integer.MAX_VALUE),
+                    OllamaJson.boundedInt(line.path("eval_count"), 0, Integer.MAX_VALUE),
+                    nanos(line.path("load_duration")), nanos(line.path("total_duration")),
+                    nanos(line.path("eval_duration")));
+            return true;
+        }
+
+        private String piece(JsonNode message, String field) throws IOException {
+            JsonNode value = message.path(field);
+            if (value.isMissingNode() || value.isNull()) {
+                return "";
+            }
+            if (!value.isTextual()) {
+                throw new IOException("Ollama returned an invalid chat message.");
+            }
+            characters += value.asText().length();
+            if (characters > MAX_CHAT_OUTPUT_CHARACTERS) {
+                throw new IOException("Ollama output exceeded the safety limit.");
+            }
+            return value.asText();
+        }
+
+        private static Duration nanos(JsonNode value) {
+            Long nanos = OllamaJson.boundedLong(value, Long.MAX_VALUE);
+            return nanos == null ? null : Duration.ofNanos(nanos);
+        }
+
+        ChatOutcome outcome() throws IOException {
+            if (outcome == null) {
+                throw new IOException("Ollama reply ended without a completion marker.");
+            }
+            return outcome;
+        }
     }
 
     /** Model names are restricted like everywhere else in DocGen (see {@link ProviderSelection#MODEL}). */
