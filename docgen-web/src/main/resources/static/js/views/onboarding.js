@@ -6,7 +6,7 @@ import { errorMessage } from '../messages.js';
 import { orderCatalog } from '../models.js';
 import { href } from '../router.js';
 import { button, loadingState, toast } from '../ui.js';
-import { catalogCard, confirmDownload, hardwareSummary, ollamaHelp, ollamaReady, pullProgress } from '../components/model-ui.js';
+import { budgetNotes, catalogCard, confirmDownload, hardwareSummary, ollamaHelp, ollamaReady, pullProgress } from '../components/model-ui.js';
 
 export const ONBOARDING_STEPS = [
   ['welcome', 'Boas-vindas'],
@@ -114,7 +114,7 @@ export async function renderOnboarding(ctx) {
       show('Seu computador',
         h('p', { class: 'muted' }, 'Isto é o que o DocGen conseguiu medir. O que não pôde ser medido aparece como "não detectado".'),
         hardwareSummary(state.hardware),
-        state.catalog.budget.notes.map((note) => h('p', { class: 'callout callout-info' }, icon('info'), h('span', null, note))),
+        budgetNotes(state.catalog.budget),
         nav(back('ollama'), button('Ver modelos recomendados', { variant: 'primary', iconName: 'chevron', onClick: () => go('model') })));
     },
 
@@ -131,6 +131,7 @@ export async function renderOnboarding(ctx) {
         RENDER.model();
       };
       show('Escolha um modelo',
+        budgetNotes(catalog.budget),
         featured.length
           ? h('p', { class: 'muted' }, 'Estas são as sugestões para o seu computador. Você pode escolher qualquer outro modelo do catálogo.')
           : h('p', { class: 'callout callout-warning' }, icon('alert'), h('span', null, 'Nenhum modelo do catálogo cabe com folga na memória livre agora. Fechar outros programas pode ajudar; você ainda pode escolher um modelo, por sua conta e risco.')),

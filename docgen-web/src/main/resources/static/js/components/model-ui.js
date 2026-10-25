@@ -17,6 +17,11 @@ export function fitBadge(fit) {
   return badge(meta.label, meta.tone, meta.icon);
 }
 
+/** Display the recommender's caveats alongside the choices they qualify. */
+export function budgetNotes(budget) {
+  return budget.notes.map((note) => h('p', { class: 'callout callout-info' }, icon('info'), h('span', null, note)));
+}
+
 /** The diagnosis as a definition list; everything unknown reads "não detectado". */
 export function hardwareSummary(hardware) {
   const gpus = hardware.gpus || [];

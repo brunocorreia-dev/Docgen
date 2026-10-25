@@ -102,6 +102,9 @@ class ModelRecommenderTest {
         assertEquals("qwen3.5:9b", recommendation.suggestedGeneral());
         assertEquals("qwen2.5-coder:7b", recommendation.suggestedCode());
         assertTrue(recommendation.budget().notes().stream().anyMatch(note -> note.contains("memória unificada")));
+        assertTrue(recommendation.budget().notes().stream().anyMatch(note ->
+                note.contains("dois terços") && note.contains("estimativa não verificada")
+                        && note.contains("não uma medição")));
     }
 
     @Test
