@@ -31,6 +31,18 @@ const ERRORS = {
   artifact_read_only: 'Diagramas são gerados a partir do plano e não podem ser editados.',
   nothing_to_export: 'Gere um plano arquitetural antes de exportar.',
   invalid_host: 'Endereço de acesso não permitido.',
+  ollama_unavailable: 'O Ollama não está rodando neste computador. Abra o Ollama e tente novamente.',
+  ollama_timeout: 'O Ollama demorou demais para responder. Modelos grandes podem levar alguns minutos para carregar; tente de novo.',
+  ollama_failed: 'O Ollama não conseguiu concluir o pedido. Tente novamente.',
+  model_not_installed: 'Este modelo não está instalado no Ollama.',
+  remote_model_refused: 'Este modelo roda fora deste computador (nuvem do Ollama ou outro servidor), então o DocGen se recusa a usá-lo.',
+  not_in_catalog: 'O DocGen só baixa e usa os modelos do seu catálogo.',
+  already_installed: 'Este modelo já está instalado.',
+  pull_in_progress: 'Já há um download em andamento. Espere terminar ou cancele-o.',
+  pull_finished: 'Este download já terminou.',
+  insufficient_disk: 'Não há espaço livre suficiente em disco para este modelo.',
+  test_in_progress: 'Já há um teste de modelo em andamento.',
+  model_busy: 'Este modelo está sendo baixado agora. Cancele o download antes de removê-lo.',
   internal_error: 'Ocorreu um erro interno. Tente novamente.',
 };
 
@@ -49,6 +61,21 @@ const JOB_ERRORS = {
   prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',
 };
+
+const PULL_ERRORS = {
+  pull_not_found: 'A biblioteca do Ollama não tem este modelo.',
+  registry_unreachable: 'O Ollama não conseguiu acessar a biblioteca de modelos. Confira a conexão com a internet e tente de novo; o download continua de onde parou.',
+  disk_full: 'O disco encheu durante o download. Libere espaço e tente de novo; o download continua de onde parou.',
+  ollama_unavailable: 'O Ollama parou de responder durante o download. Abra o Ollama e tente de novo; o download continua de onde parou.',
+  ollama_timeout: 'O Ollama parou de enviar o progresso. Tente de novo; o download continua de onde parou.',
+  remote_model_refused: 'O DocGen nunca baixa modelos de nuvem.',
+  pull_failed: 'O Ollama não conseguiu baixar o modelo. Tente de novo.',
+};
+
+export function pullErrorMessage(error) {
+  if (!error) return '';
+  return PULL_ERRORS[error.code] || PULL_ERRORS.pull_failed;
+}
 
 export function errorMessage(error) {
   if (!error) return ERRORS.internal_error;

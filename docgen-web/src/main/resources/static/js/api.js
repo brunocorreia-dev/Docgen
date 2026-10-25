@@ -132,6 +132,23 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
     },
     eraseAllData: () => request('DELETE', '/api/v1/data'),
 
+    ollamaStatus: () => request('GET', '/api/v1/ollama/status'),
+    hardware: () => request('GET', '/api/v1/hardware'),
+    modelCatalog: () => request('GET', '/api/v1/models/catalog'),
+    installedModels: () => request('GET', '/api/v1/models'),
+    // Model tags may contain ":" and "/", so they travel as a query parameter or in the body.
+    modelDetails: (name) => request('GET', `/api/v1/models/details?name=${id(name)}`),
+    deleteModel: (name) => request('DELETE', `/api/v1/models?name=${id(name)}`),
+    testModel: (model) => post('/api/v1/models/test', { model }),
+    startPull: (model) => post('/api/v1/models/pulls', { model }),
+    listPulls: () => request('GET', '/api/v1/models/pulls'),
+    pullStatus: (pullId, { signal } = {}) => request('GET', `/api/v1/models/pulls/${id(pullId)}`, { signal }),
+    cancelPull: (pullId) => request('DELETE', `/api/v1/models/pulls/${id(pullId)}`),
+
+    settings: () => request('GET', '/api/v1/settings'),
+    setDefaultModel: (model) => request('PUT', '/api/v1/settings/default-model', { json: { model } }),
+    setOnboardingCompleted: (completed) => request('PUT', '/api/v1/settings/onboarding', { json: { completed } }),
+
     listProjects: () => request('GET', '/api/v1/projects'),
     getProject: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}`),
     createProject: (project) => post('/api/v1/projects', project),

@@ -141,3 +141,27 @@ test('the session token store keeps only the token and ignores malformed entries
   store.clear();
   assert.equal(backing.has('docgen.session'), false);
 });
+
+test('model tags travel encoded in the query or in the body, never as a path segment', async () => {
+  const { calls, fetchImpl } = recorder(response(200, {}), response(204, null), response(202, { id: 'p' }),
+    response(200, {}), response(202, {}), response(200, {}), response(200, {}));
+  const api = createApi({ fetchImpl, tokenStore: memoryTokenStore() });
+
+  await api.modelDetails('user/model:7b');
+  await api.deleteModel('qwen3:8b');
+  await api.startPull('qwen3:8b');
+  await api.pullStatus('11111111-2222-3333-4444-555555555555');
+  await api.cancelPull('11111111-2222-3333-4444-555555555555');
+  await api.setDefaultModel('qwen3:8b');
+  await api.setOnboardingCompleted(true);
+
+  assert.equal(calls[0].url, '/api/v1/models/details?name=user%2Fmodel%3A7b');
+  assert.equal(calls[1].url, '/api/v1/models?name=qwen3%3A8b');
+  assert.equal(calls[1].options.method, 'DELETE');
+  assert.deepEqual(JSON.parse(calls[2].options.body), { model: 'qwen3:8b' });
+  assert.equal(calls[3].url, '/api/v1/models/pulls/11111111-2222-3333-4444-555555555555');
+  assert.equal(calls[4].options.method, 'DELETE');
+  assert.equal(calls[5].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[5].options.body), { model: 'qwen3:8b' });
+  assert.deepEqual(JSON.parse(calls[6].options.body), { completed: true });
+});

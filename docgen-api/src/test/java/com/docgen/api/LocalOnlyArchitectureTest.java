@@ -37,7 +37,13 @@ class LocalOnlyArchitectureTest {
 
     /** Identifiers that look like URLs but are never fetched, each with the reason it is safe. */
     private static final Map<String, String> NEVER_FETCHED = Map.of(
-            "http://www.w3.org/2000/svg", "XML namespace of inline SVG elements; browsers never request it");
+            "http://www.w3.org/2000/svg", "XML namespace of inline SVG elements; browsers never request it",
+            "https://ollama.com/download", "official Ollama download page, a link the user may open in a new tab "
+                    + "(ADR 0003, item 6); the app never requests it",
+            "https://docs.ollama.com/faq#how-do-i-disable-ollama-cloud-features", "official instructions for "
+                    + "Ollama's local-only mode, a link the user may open in a new tab; the app never requests it");
+    /** The only production file that may hold the user links above. */
+    private static final String LINKS_SOURCE = "docgen-web/src/main/resources/static/js/links.js";
 
     /** The only file that may write a bare scheme: it prefixes the fixed loopback host constant. */
     private static final String ENDPOINT_SOURCE = "docgen-core/src/main/java/com/docgen/OllamaEndpoint.java";
@@ -73,8 +79,9 @@ class LocalOnlyArchitectureTest {
                 while (matcher.find()) {
                     String uri = matcher.group();
                     boolean bareSchemeInEndpoint = source.path().equals(ENDPOINT_SOURCE) && uri.equals("http://");
-                    if (!bareSchemeInEndpoint && !LOOPBACK.matcher(uri).matches()
-                            && !NEVER_FETCHED.containsKey(uri)) {
+                    boolean neverFetched = NEVER_FETCHED.containsKey(uri)
+                            && (uri.startsWith("http://www.w3.org/") || source.path().equals(LINKS_SOURCE));
+                    if (!bareSchemeInEndpoint && !LOOPBACK.matcher(uri).matches() && !neverFetched) {
                         violations.add(source.path() + ":" + (number + 1) + " " + uri);
                     }
                 }

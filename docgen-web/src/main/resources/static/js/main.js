@@ -14,12 +14,16 @@ import { renderNewProject } from './views/project-new.js';
 import { renderWorkspace } from './views/workspace.js';
 import { renderDocuments } from './views/documents.js';
 import { renderSettings, applyMotionPreference } from './views/settings.js';
+import { renderModels } from './views/models.js';
+import { renderOnboarding } from './views/onboarding.js';
 
 const root = document.getElementById('app');
 const tokenStore = sessionTokenStore();
 let shell = null;
 let viewController = null;
 let stopHeartbeat = null;
+/** The first-run guide opens by itself once per tab; "Configurar depois" is respected until the next start. */
+let onboardingChecked = false;
 
 const api = createApi({
   tokenStore,
@@ -31,6 +35,7 @@ const NAV = [
   ['projects', 'Projetos', 'folder'],
   ['project-new', 'Novo projeto', 'plus'],
   ['documents', 'Documentações', 'file'],
+  ['models', 'Modelos', 'cpu'],
   ['settings', 'Configurações', 'settings'],
 ];
 
@@ -99,7 +104,26 @@ const VIEWS = {
   project: [renderWorkspace, 'Projeto'],
   documents: [renderDocuments, 'Documentações'],
   settings: [renderSettings, 'Configurações'],
+  models: [renderModels, 'Modelos'],
+  onboarding: [renderOnboarding, 'Configuração inicial'],
 };
+
+/** Opens the first-run guide when it was never completed. */
+async function firstRunGuide(current) {
+  if (onboardingChecked) return false;
+  onboardingChecked = true;
+  if (current.name === 'onboarding') return false;
+  try {
+    const settings = await api.settings();
+    if (!settings.onboardingCompleted) {
+      location.hash = href('onboarding');
+      return true;
+    }
+  } catch {
+    // Without the settings the app still works; the guide stays reachable from Models.
+  }
+  return false;
+}
 
 async function route() {
   viewController?.abort();
@@ -117,6 +141,7 @@ async function route() {
     replace(root, shell.element);
     stopHeartbeat = startHeartbeat({ api, onLost: () => leaveShell(closedScreen()) });
   }
+  if (await firstRunGuide(current)) return;
   const navRoute = current.name === 'project' ? 'projects' : current.name;
   shell.navLinks.forEach((link) => {
     const active = link.dataset.route === navRoute;
