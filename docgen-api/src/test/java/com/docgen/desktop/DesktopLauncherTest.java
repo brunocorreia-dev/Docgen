@@ -195,6 +195,10 @@ class DesktopLauncherTest {
         assertFalse(instance.shutdownThread().orElseThrow().isDaemon(),
                 "requested from a daemon Tomcat thread, the stopper must still keep the JVM alive until it is done");
         assertTrue(instance.awaitStopped(Duration.ofSeconds(20)));
+        // The stopper asks for the exit right after the stop finishes; wait for it instead of racing it.
+        Thread stopper = instance.shutdownThread().orElseThrow();
+        stopper.join(Duration.ofSeconds(5));
+        assertFalse(stopper.isAlive());
 
         assertEquals(1, exits.get(), "the process is asked to exit");
         assertTrue(InstanceFile.read(data).isEmpty(), "instance.json is removed");
