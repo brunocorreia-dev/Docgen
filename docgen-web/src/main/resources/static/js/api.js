@@ -1,6 +1,6 @@
-// HTTP client for the DocGen REST API. Credentials are a bearer token sent in
-// the Authorization header only (never cookies), which is why cross-site
-// requests cannot ride on the user's session.
+// HTTP client for the DocGen REST API. The only credential is a session token
+// sent in the Authorization header (never a cookie), born from the single-use
+// launch token the desktop launcher puts in the /launch address (ADR 0002).
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -13,7 +13,10 @@ export class ApiError extends Error {
 
 const TOKEN_KEY = 'docgen.session';
 
-/** Token storage in sessionStorage: scoped to this tab and cleared when it closes. */
+/**
+ * Session storage scoped to this tab (sessionStorage is per origin and never
+ * sent automatically). A new tab has no session: it opens through the launcher.
+ */
 export function sessionTokenStore(storage = globalThis.sessionStorage) {
   return {
     get() {
@@ -21,28 +24,16 @@ export function sessionTokenStore(storage = globalThis.sessionStorage) {
         const raw = storage.getItem(TOKEN_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed.token !== 'string') return null;
-        if (parsed.expiresAt && Date.parse(parsed.expiresAt) <= Date.now()) {
-          storage.removeItem(TOKEN_KEY);
-          return null;
-        }
-        return parsed.token;
+        return parsed && typeof parsed.token === 'string' ? parsed.token : null;
       } catch {
         return null;
       }
     },
-    username() {
+    set(token) {
       try {
-        return JSON.parse(storage.getItem(TOKEN_KEY) || 'null')?.username ?? null;
+        storage.setItem(TOKEN_KEY, JSON.stringify({ token }));
       } catch {
-        return null;
-      }
-    },
-    set(token, expiresAt, username) {
-      try {
-        storage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt, username }));
-      } catch {
-        // Storage can be unavailable (private mode); the session then lasts for this page only.
+        // Storage can be unavailable; the session then lasts for this page only.
       }
     },
     clear() {
@@ -56,12 +47,11 @@ export function sessionTokenStore(storage = globalThis.sessionStorage) {
 }
 
 export function memoryTokenStore() {
-  let state = null;
+  let token = null;
   return {
-    get: () => state?.token ?? null,
-    username: () => state?.username ?? null,
-    set: (token, expiresAt, username) => { state = { token, expiresAt, username }; },
-    clear: () => { state = null; },
+    get: () => token,
+    set: (value) => { token = value; },
+    clear: () => { token = null; },
   };
 }
 
@@ -69,7 +59,7 @@ const id = (value) => encodeURIComponent(String(value));
 
 export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), tokenStore = memoryTokenStore(), onUnauthorized } = {}) {
   async function request(method, path, { json, body, headers = {}, raw = false, signal } = {}) {
-    const requestHeaders = { 'X-DocGen-Client': 'web', Accept: 'application/json', ...headers };
+    const requestHeaders = { Accept: 'application/json', ...headers };
     const token = tokenStore.get();
     if (token) requestHeaders.Authorization = `Bearer ${token}`;
     let payload = body;
@@ -119,42 +109,45 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
   return {
     tokenStore,
 
-    async login(username, password) {
-      const session = await post('/api/v1/auth/token', { username, password });
-      tokenStore.set(session.accessToken, session.expiresAt, session.username);
+    /** Exchanges the launch token from the /launch address for this tab's session. */
+    async startSession(launchToken) {
+      const session = await post('/api/v1/session', { launchToken });
+      tokenStore.set(session.accessToken);
       return session;
     },
-    async logout() {
+    async endSession() {
       try {
-        if (tokenStore.get()) await request('DELETE', '/api/v1/auth/token');
+        if (tokenStore.get()) await request('DELETE', '/api/v1/session');
       } finally {
         tokenStore.clear();
       }
     },
-    session: () => request('GET', '/api/v1/auth/session'),
-
-    // Desktop pairing (only when the DocGen launcher started the server). The
-    // poll secret stays in memory and travels only in a same-origin JSON body.
-    desktopStatus: () => request('GET', '/api/v1/desktop/status'),
-    startPairing: () => post('/api/v1/desktop/pairings', {}),
-    async pollPairing(pairingId, pollSecret, { signal } = {}) {
-      const response = await request('POST', `/api/v1/desktop/pairings/${id(pairingId)}/token`,
-        { json: { pollSecret }, raw: true, signal });
-      let body = null;
-      try {
-        body = await response.json();
-      } catch {
-        body = null;
-      }
-      if (response.status === 202) return { pending: true, expiresAt: body?.expiresAt ?? null };
-      if (response.status !== 200 || typeof body?.accessToken !== 'string' || typeof body?.username !== 'string') {
-        throw new ApiError(response.status, 'invalid_response', 'Unexpected pairing response');
-      }
-      tokenStore.set(body.accessToken, body.expiresAt, body.username);
-      return { pending: false, username: body.username };
-    },
+    session: () => request('GET', '/api/v1/session'),
     health: () => request('GET', '/api/v1/health'),
-    providers: () => request('GET', '/api/v1/providers'),
+    heartbeat: () => post('/api/v1/desktop/heartbeat'),
+    /** "Sair do DocGen": the server answers, then stops. */
+    async quit() {
+      await post('/api/v1/desktop/shutdown');
+      tokenStore.clear();
+    },
+    eraseAllData: () => request('DELETE', '/api/v1/data'),
+
+    ollamaStatus: () => request('GET', '/api/v1/ollama/status'),
+    hardware: () => request('GET', '/api/v1/hardware'),
+    modelCatalog: () => request('GET', '/api/v1/models/catalog'),
+    installedModels: () => request('GET', '/api/v1/models'),
+    // Model tags may contain ":" and "/", so they travel as a query parameter or in the body.
+    modelDetails: (name) => request('GET', `/api/v1/models/details?name=${id(name)}`),
+    deleteModel: (name) => request('DELETE', `/api/v1/models?name=${id(name)}`),
+    testModel: (model) => post('/api/v1/models/test', { model }),
+    startPull: (model) => post('/api/v1/models/pulls', { model }),
+    listPulls: () => request('GET', '/api/v1/models/pulls'),
+    pullStatus: (pullId, { signal } = {}) => request('GET', `/api/v1/models/pulls/${id(pullId)}`, { signal }),
+    cancelPull: (pullId) => request('DELETE', `/api/v1/models/pulls/${id(pullId)}`),
+
+    settings: () => request('GET', '/api/v1/settings'),
+    setDefaultModel: (model) => request('PUT', '/api/v1/settings/default-model', { json: { model } }),
+    setOnboardingCompleted: (completed) => request('PUT', '/api/v1/settings/onboarding', { json: { completed } }),
 
     listProjects: () => request('GET', '/api/v1/projects'),
     getProject: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}`),
@@ -172,8 +165,6 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
     deleteAttachment: (projectId, attachmentId) =>
       request('DELETE', `/api/v1/projects/${id(projectId)}/attachments/${id(attachmentId)}`),
 
-    previewTransmission: (projectId, preview) =>
-      post(`/api/v1/projects/${id(projectId)}/transmission-previews`, preview),
     startPlanning: (projectId, options = {}) => post(`/api/v1/projects/${id(projectId)}/plans`, options),
     listPlans: (projectId) => request('GET', `/api/v1/projects/${id(projectId)}/plans`),
     getPlan: (projectId, planId) => request('GET', `/api/v1/projects/${id(projectId)}/plans/${id(planId)}`),

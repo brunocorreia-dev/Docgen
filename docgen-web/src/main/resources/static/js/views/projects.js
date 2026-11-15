@@ -1,7 +1,7 @@
 import { h, replace } from '../dom.js';
 import { icon } from '../icons.js';
 import { href } from '../router.js';
-import { relativeTime, pluralize } from '../format.js';
+import { pluralize, providerLabel, relativeTime } from '../format.js';
 import { errorMessage } from '../messages.js';
 import { button, emptyState, errorState, skeleton } from '../ui.js';
 
@@ -51,7 +51,7 @@ export async function renderProjects(ctx) {
       project.stats.activeJobs ? h('span', { class: 'badge badge-info' }, h('span', { class: 'pulse-dot' }), 'Processando') : null),
     h('p', { class: 'project-card-text' }, project.descriptionPreview),
     h('div', { class: 'project-card-meta' },
-      h('span', { class: 'chip' }, icon(project.provider === 'groq' ? 'cloud' : 'server', { size: 14 }), project.provider === 'groq' ? 'Groq' : 'Ollama'),
+      h('span', { class: 'chip' }, icon('server', { size: 14 }), providerLabel(project.provider)),
       h('span', { class: 'chip' }, icon('upload', { size: 14 }), pluralize(project.stats.attachments, 'anexo', 'anexos')),
       h('span', { class: 'chip' }, icon('layers', { size: 14 }), pluralize(project.stats.plans, 'plano', 'planos')),
       h('span', { class: 'chip' }, icon('file', { size: 14 }), pluralize(project.stats.artifacts, 'documento', 'documentos'))))));

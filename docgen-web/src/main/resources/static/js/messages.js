@@ -2,10 +2,12 @@
 // messages; the workspace translates the codes it knows.
 
 const ERRORS = {
-  network_error: 'Não foi possível contactar o servidor DocGen. Verifique se a API está em execução.',
-  invalid_credentials: 'Usuário ou senha incorretos.',
-  too_many_attempts: 'Muitas tentativas de acesso. Aguarde alguns instantes e tente novamente.',
-  authentication_required: 'Sua sessão expirou. Entre novamente.',
+  network_error: 'Não foi possível falar com o DocGen. Ele pode ter sido encerrado: abra-o de novo pelo menu ou pelo atalho.',
+  authentication_required: 'Sua sessão terminou. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_invalid: 'Este link de acesso expirou ou já foi usado. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_reused: 'Este link de acesso já tinha sido usado por outro programa. Por segurança, a sessão foi encerrada.',
+  origin_rejected: 'A requisição veio de uma página que não é o DocGen e foi bloqueada.',
+  desktop_unavailable: 'Esta ação só existe no aplicativo DocGen para desktop.',
   access_denied: 'Você não tem permissão para esta ação.',
   invalid_request: 'Os dados enviados são inválidos. Revise os campos destacados.',
   not_found: 'O recurso não foi encontrado.',
@@ -19,10 +21,6 @@ const ERRORS = {
   pdf_too_many_pages: 'O PDF excede o limite de páginas.',
   pdf_no_text: 'O PDF não tem texto extraível. Documentos digitalizados (OCR) ainda não são suportados.',
   pdf_timeout: 'O PDF demorou demais para ser processado.',
-  remote_disabled: 'Provedores remotos estão desativados neste servidor (DOCGEN_ALLOW_REMOTE).',
-  consent_required: 'Este provedor envia dados para um serviço remoto. Revise e autorize a transmissão.',
-  consent_invalid: 'A autorização de envio expirou ou é inválida. Revise a transmissão novamente.',
-  consent_stale: 'O projeto mudou depois da revisão. Revise a transmissão novamente.',
   plan_not_approved: 'Aprove o plano arquitetural antes de gerar a documentação.',
   plan_state_changed: 'O plano foi alterado durante a aprovação. Recarregue a página.',
   too_many_jobs: 'Há muitas tarefas em andamento. Aguarde a conclusão de alguma delas.',
@@ -32,7 +30,6 @@ const ERRORS = {
   unsafe_markdown: 'O documento precisa ser Markdown passivo (sem HTML, imagens ou scripts) e começar com um título H1.',
   artifact_read_only: 'Diagramas são gerados a partir do plano e não podem ser editados.',
   nothing_to_export: 'Gere um plano arquitetural antes de exportar.',
-  too_many_sessions: 'Há sessões ativas demais no servidor.',
   invalid_host: 'Endereço de acesso não permitido.',
   pairing_unavailable: 'Para conectar este navegador, clique em “Abrir DocGen” na janela do aplicativo DocGen.',
   pairing_conflict: 'Outra solicitação de acesso apareceu ao mesmo tempo e, por segurança, todas foram canceladas. Clique em “Abrir DocGen” na janela do aplicativo para tentar de novo.',
@@ -47,18 +44,32 @@ const JOB_ERRORS = {
   cancelled: 'A tarefa foi cancelada.',
   interrupted: 'O servidor foi reiniciado antes da conclusão da tarefa.',
   timeout: 'A tarefa excedeu o tempo limite.',
-  consent_required: 'O envio remoto não foi autorizado.',
   invalid_model_output: 'O modelo não retornou um plano arquitetural válido. Tente novamente ou use outro modelo.',
   unsafe_model_output: 'A documentação gerada foi bloqueada pelas verificações de segurança de Markdown.',
-  provider_timeout: 'O provedor de IA não respondeu a tempo.',
-  provider_unavailable: 'O provedor de IA não está acessível. Para Ollama, confirme que o serviço está rodando em 127.0.0.1:11434.',
-  provider_not_configured: 'O provedor de IA não está configurado no servidor (GROQ_API_KEY).',
-  provider_rate_limited: 'O limite de uso do provedor de IA foi atingido. Aguarde e tente novamente.',
-  provider_rejected: 'O provedor de IA recusou as credenciais configuradas no servidor.',
-  provider_payload_too_large: 'O conteúdo é grande demais para o provedor. Reduza a descrição ou os anexos.',
-  provider_failed: 'A requisição ao provedor de IA falhou.',
+  provider_timeout: 'O Ollama não respondeu a tempo. Modelos grandes podem demorar no primeiro uso; tente novamente.',
+  provider_unavailable: 'O Ollama não está acessível neste computador. Abra o Ollama e tente novamente.',
+  provider_failed: 'A requisição ao Ollama falhou. Tente novamente.',
+  model_not_installed: 'O modelo escolhido não está instalado no Ollama. Instale-o pelo Ollama ou escolha outro modelo no projeto. O DocGen não baixa modelos sozinho.',
+  remote_model_refused: 'O modelo escolhido roda fora deste computador (nuvem do Ollama ou outro servidor), então o DocGen se recusou a usá-lo. Escolha um modelo local.',
+  prompt_too_large: 'O conteúdo não cabe na janela de contexto do modelo. Reduza a descrição ou os anexos, ou escolha um modelo com contexto maior.',
+  prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',
 };
+
+const PULL_ERRORS = {
+  pull_not_found: 'A biblioteca do Ollama não tem este modelo.',
+  registry_unreachable: 'O Ollama não conseguiu acessar a biblioteca de modelos. Confira a conexão com a internet e tente de novo; o download continua de onde parou.',
+  disk_full: 'O disco encheu durante o download. Libere espaço e tente de novo; o download continua de onde parou.',
+  ollama_unavailable: 'O Ollama parou de responder durante o download. Abra o Ollama e tente de novo; o download continua de onde parou.',
+  ollama_timeout: 'O Ollama parou de enviar o progresso. Tente de novo; o download continua de onde parou.',
+  remote_model_refused: 'O DocGen nunca baixa modelos de nuvem.',
+  pull_failed: 'O Ollama não conseguiu baixar o modelo. Tente de novo.',
+};
+
+export function pullErrorMessage(error) {
+  if (!error) return '';
+  return PULL_ERRORS[error.code] || PULL_ERRORS.pull_failed;
+}
 
 export function errorMessage(error) {
   if (!error) return ERRORS.internal_error;
@@ -109,12 +120,6 @@ export const COMPONENT_TYPE = {
 };
 
 export const IMPACT = { LOW: 'Baixo', MEDIUM: 'Médio', HIGH: 'Alto' };
-
-export const INCLUDED_DATA = {
-  project_brief: 'Nome, descrição, requisitos, tecnologias e restrições do projeto',
-  attachment_text: 'Texto extraído dos PDFs anexados (com segredos redigidos)',
-  approved_plan: 'Plano arquitetural aprovado',
-};
 
 export const ARTIFACT_LABEL = {
   README: 'README.md',

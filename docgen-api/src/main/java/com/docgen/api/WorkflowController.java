@@ -29,14 +29,6 @@ class WorkflowController {
         this.artifacts = artifacts;
     }
 
-    @PostMapping("/api/v1/projects/{projectId}/transmission-previews")
-    WorkflowDtos.TransmissionPreview preview(
-            @PathVariable("projectId") String projectId,
-            @Valid @RequestBody WorkflowDtos.TransmissionRequest request
-    ) {
-        return workflow.preview(CurrentUser.username(), projectId, request);
-    }
-
     @PostMapping("/api/v1/projects/{projectId}/plans")
     ResponseEntity<JobService.JobView> plan(
             @PathVariable("projectId") String projectId,

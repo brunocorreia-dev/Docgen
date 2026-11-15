@@ -46,10 +46,6 @@ class AuthorizedRepositoryRegistryTest {
     }
 
     private static AuthorizedRepositoryRegistry registry(Map<String, String> repositories) {
-        DocGenApiProperties properties = new DocGenApiProperties(
-                new DocGenApiProperties.Api("analyst", "long-test-password"),
-                repositories
-        );
-        return new AuthorizedRepositoryRegistry(properties);
+        return new AuthorizedRepositoryRegistry(new DocGenApiProperties(repositories));
     }
 }

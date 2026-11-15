@@ -1,17 +1,14 @@
 package com.docgen.api;
 
+import com.docgen.OllamaEndpoint;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -22,10 +19,9 @@ import java.util.Objects;
 @Validated
 @ConfigurationProperties(prefix = "docgen")
 public record DocGenApiProperties(
-        @Valid Api api,
         Map<String, String> repositories,
         @Valid Storage storage,
-        @Valid Remote remote,
+        @Valid Ollama ollama,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
         @Valid Auth auth,
@@ -35,7 +31,7 @@ public record DocGenApiProperties(
     public DocGenApiProperties {
         repositories = repositories == null ? Map.of() : Map.copyOf(repositories);
         storage = Objects.requireNonNullElseGet(storage, () -> new Storage(null, false));
-        remote = Objects.requireNonNullElseGet(remote, () -> new Remote(false));
+        ollama = Objects.requireNonNullElseGet(ollama, () -> new Ollama(0));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
         auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
@@ -77,8 +73,15 @@ public record DocGenApiProperties(
     public record Storage(String dataDirectory, boolean inMemory) {
     }
 
-    /** Operator-level gate: remote providers are unusable unless this is true. */
-    public record Remote(boolean enabled) {
+    /** Port of the local Ollama service; the host is always 127.0.0.1 and cannot be configured. */
+    public record Ollama(@Min(0) @Max(65_535) int port) {
+        public Ollama {
+            port = port == 0 ? OllamaEndpoint.DEFAULT_PORT : port;
+        }
+
+        public OllamaEndpoint endpoint() {
+            return new OllamaEndpoint(port);
+        }
     }
 
     public record Jobs(
@@ -129,9 +132,19 @@ public record DocGenApiProperties(
 
     public record Auth(Duration tokenTtl, Duration idleTimeout, Duration consentTtl) {
         public Auth {
-            tokenTtl = tokenTtl == null ? Duration.ofHours(8) : tokenTtl;
-            idleTimeout = idleTimeout == null ? Duration.ofMinutes(30) : idleTimeout;
-            consentTtl = consentTtl == null ? Duration.ofMinutes(10) : consentTtl;
+            idleTimeout = idleTimeout == null ? Duration.ofHours(12) : idleTimeout;
+        }
+    }
+
+    /**
+     * Desktop app lifecycle (ADR 0001).
+     *
+     * @param idleTimeout the app exits when the UI sent no heartbeat for this long and no
+     *                    model download or generation is running
+     */
+    public record Desktop(Duration idleTimeout) {
+        public Desktop {
+            idleTimeout = idleTimeout == null ? Duration.ofMinutes(10) : idleTimeout;
         }
     }
 }

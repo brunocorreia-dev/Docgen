@@ -5,14 +5,7 @@ import { toast } from '../ui.js';
 import { projectForm } from './project-form.js';
 
 export async function renderNewProject(ctx) {
-  let providers = [];
-  try {
-    providers = await ctx.providers();
-  } catch {
-    providers = [];
-  }
   const { form, showErrors } = projectForm({
-    providers,
     showDemo: true,
     onSubmit: async (payload) => {
       try {

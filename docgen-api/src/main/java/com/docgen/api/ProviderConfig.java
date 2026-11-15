@@ -2,29 +2,42 @@ package com.docgen.api;
 
 import com.docgen.ArchitecturePlanningService;
 import com.docgen.DocumentationService;
-import com.docgen.LLMProvider;
 import com.docgen.LLMProviderFactory;
 import com.docgen.LLMProviderResolver;
+import com.docgen.OllamaEndpoint;
 import com.docgen.ProjectDocumentationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Optional;
+import java.util.function.Supplier;
+
 /**
- * Provider wiring. Provider endpoints stay fixed in the core (Groq HTTPS API,
- * Ollama on 127.0.0.1) and the Groq key is read from the server environment
- * only; nothing here is configurable from a request. Tests replace the
- * resolver bean with a fake so they never reach a real provider.
+ * Provider wiring. The only provider is the local Ollama service, whose
+ * loopback endpoint is fixed in the core; nothing here is configurable from a
+ * request. Tests replace the resolver bean with a fake so they never reach a
+ * real model.
  */
 @Configuration(proxyBeanMethods = false)
 class ProviderConfig {
     @Bean
-    LLMProviderResolver llmProviderResolver() {
-        return LLMProviderFactory::create;
+    LLMProviderResolver llmProviderResolver(DocGenApiProperties properties, SettingsService settings) {
+        OllamaEndpoint endpoint = properties.ollama().endpoint();
+        return model -> LLMProviderFactory.create(
+                modelFor(model, () -> settings.defaultModel(SessionTokenService.OWNER)), endpoint);
+    }
+
+    /** A project without a model uses the app's default model, and the CLI default without one. */
+    static String modelFor(String requested, Supplier<Optional<String>> appDefault) {
+        if (requested != null && !requested.isBlank()) {
+            return requested;
+        }
+        return appDefault.get().orElse(LLMProviderFactory.DEFAULT_MODEL);
     }
 
     @Bean
-    DocumentationService documentationService() {
-        return new DocumentationService();
+    DocumentationService documentationService(LLMProviderResolver resolver) {
+        return new DocumentationService(resolver);
     }
 
     @Bean
@@ -35,16 +48,5 @@ class ProviderConfig {
     @Bean
     ProjectDocumentationService projectDocumentationService(LLMProviderResolver resolver) {
         return new ProjectDocumentationService(resolver);
-    }
-
-    /** Describes where a selection would send data, without any network access. */
-    static String destination(LLMProviderResolver resolver, String provider, String model) {
-        LLMProvider client = resolver.create(provider, model, true);
-        return client.describeDestination();
-    }
-
-    static boolean groqKeyConfigured() {
-        String key = System.getenv("GROQ_API_KEY");
-        return key != null && !key.isBlank();
     }
 }

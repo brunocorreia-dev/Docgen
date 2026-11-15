@@ -10,8 +10,8 @@ import java.util.Objects;
  * {@link ArchitecturePlan} with a Mermaid export.
  *
  * <p>Work is split into {@link #prepare} (builds the exact prompt, no network)
- * and {@link #plan} (one provider call) so that interfaces can show the user
- * what would be transmitted and bind their consent to that exact content.</p>
+ * and {@link #plan} (one local provider call) so that interfaces can snapshot
+ * the exact input before the call runs asynchronously.</p>
  */
 public final class ArchitecturePlanningService {
     private final LLMProviderResolver providerResolver;
@@ -37,11 +37,6 @@ public final class ArchitecturePlanningService {
         public int characterCount() {
             return prompt.length();
         }
-
-        /** Binds consent to this exact prompt and the selected provider/model. */
-        public String digest(ProviderSelection selection) {
-            return PromptDigest.of("plan", selection.provider(), String.valueOf(selection.model()), prompt);
-        }
     }
 
     public record Result(ArchitecturePlan plan, String mermaid, List<String> warnings) {
@@ -59,16 +54,10 @@ public final class ArchitecturePlanningService {
         return new Preparation(brief, prompt.text(), prompt.documentCount(), prompt.documentsTrimmed());
     }
 
-    public Result plan(
-            Preparation preparation,
-            ProviderSelection selection,
-            DocumentationService.RemoteConsent remoteConsent
-    ) throws Exception {
+    public Result plan(Preparation preparation, ProviderSelection selection) throws Exception {
         Objects.requireNonNull(preparation, "preparation");
         Objects.requireNonNull(selection, "selection");
-        Objects.requireNonNull(remoteConsent, "remoteConsent");
-        LLMProvider provider = RemoteGate.authorize(providerResolver, selection, remoteConsent,
-                preparation.documentCount(), preparation.characterCount());
+        LLMProvider provider = providerResolver.create(selection.model());
         String output = provider.generateStructured(preparation.prompt());
         ArchitecturePlanParser.ParsedPlan parsed = parser.parse(output, preparation.brief());
         String mermaid = MermaidDiagram.fromPlan(parsed.plan());

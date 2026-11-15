@@ -8,47 +8,21 @@ import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
 
-/** HTTP contracts for transmission previews, planning and documentation generation. */
+/** HTTP contracts for planning and documentation generation. */
 final class WorkflowDtos {
     private WorkflowDtos() {
     }
 
-    record TransmissionRequest(
-            @NotNull RemoteConsentService.Operation operation,
-            @Pattern(regexp = ProjectDtos.PROVIDER) String provider,
-            @Size(max = 100) @Pattern(regexp = ProjectDtos.MODEL) String model,
-            @Size(max = 36) String planId
-    ) {
-    }
-
-    record TransmissionPreview(
-            RemoteConsentService.Operation operation,
-            String provider,
-            String model,
-            boolean remote,
-            boolean remoteEnabled,
-            String destination,
-            List<String> includedData,
-            int documentCount,
-            boolean documentsTrimmed,
-            int characterCount,
-            String consentToken,
-            Instant consentExpiresAt
-    ) {
-    }
-
     record PlanningRequest(
             @Pattern(regexp = ProjectDtos.PROVIDER) String provider,
-            @Size(max = 100) @Pattern(regexp = ProjectDtos.MODEL) String model,
-            @Size(max = 64) String consentToken
+            @Size(max = 100) @Pattern(regexp = ProjectDtos.MODEL) String model
     ) {
     }
 
     record DocumentationRequest(
             @NotNull @Size(max = 36) String planId,
             @Pattern(regexp = ProjectDtos.PROVIDER) String provider,
-            @Size(max = 100) @Pattern(regexp = ProjectDtos.MODEL) String model,
-            @Size(max = 64) String consentToken
+            @Size(max = 100) @Pattern(regexp = ProjectDtos.MODEL) String model
     ) {
     }
 

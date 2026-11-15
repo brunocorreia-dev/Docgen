@@ -11,23 +11,19 @@ class ProviderJsonModeTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void groqRequestsAJsonObjectOnlyForStructuredCalls() throws Exception {
-        GroqProvider provider = new GroqProvider("model-x", "unused", null);
+    void ollamaRequestsJsonFormatOnlyForStructuredCalls() throws Exception {
+        OllamaProvider provider = new OllamaProvider("llama3.2", OllamaEndpoint.DEFAULT);
 
-        JsonNode structured = MAPPER.readTree(provider.buildRequestBody("prompt", true));
-        JsonNode documentation = MAPPER.readTree(provider.buildRequestBody("prompt", false));
-
-        assertEquals("json_object", structured.path("response_format").path("type").asText());
-        assertTrue(documentation.path("response_format").isMissingNode());
-        assertEquals("model-x", structured.path("model").asText());
-        assertEquals("prompt", structured.path("messages").path(0).path("content").asText());
+        assertEquals("json", MAPPER.readTree(provider.buildRequestBody("p", true, 4096)).path("format").asText());
+        assertTrue(MAPPER.readTree(provider.buildRequestBody("p", false, 4096)).path("format").isMissingNode());
     }
 
     @Test
-    void ollamaRequestsJsonFormatOnlyForStructuredCalls() throws Exception {
-        OllamaProvider provider = new OllamaProvider("llama3.2", null);
+    void everyRequestCarriesTheContextWindowAndTheAnswerCap() throws Exception {
+        JsonNode options = MAPPER.readTree(new OllamaProvider("llama3.2", OllamaEndpoint.DEFAULT)
+                .buildRequestBody("p", false, 10_240)).path("options");
 
-        assertEquals("json", MAPPER.readTree(provider.buildRequestBody("p", true)).path("format").asText());
-        assertTrue(MAPPER.readTree(provider.buildRequestBody("p", false)).path("format").isMissingNode());
+        assertEquals(10_240, options.path("num_ctx").asInt());
+        assertEquals(OllamaProvider.OUTPUT_RESERVE_TOKENS, options.path("num_predict").asInt());
     }
 }

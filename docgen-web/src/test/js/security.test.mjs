@@ -32,13 +32,28 @@ test('views use the null-safe replace helper instead of native replaceChildren',
   }
 });
 
-test('the page has no inline scripts, styles or handlers and loads only same-origin assets', () => {
-  const html = readFileSync(join(STATIC, 'index.html'), 'utf8');
-  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), 'inline <script>');
-  assert.ok(!/<style/i.test(html), 'inline <style>');
-  assert.ok(!/\son[a-z]+\s*=/i.test(html), 'inline event handler');
-  assert.ok(!/\sstyle\s*=/i.test(html), 'style attribute');
-  assert.ok(!/(src|href)=["']https?:/i.test(html), 'third-party asset');
+test('the pages have no inline scripts, styles or handlers and load only same-origin assets', () => {
+  const pages = files(STATIC, '.html');
+  assert.deepEqual(pages.map((page) => page.slice(STATIC.length + 1)).sort(), ['index.html', 'launch.html']);
+  for (const page of pages) {
+    const html = readFileSync(page, 'utf8');
+    assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), `${page}: inline <script>`);
+    assert.ok(!/<style/i.test(html), `${page}: inline <style>`);
+    assert.ok(!/\son[a-z]+\s*=/i.test(html), `${page}: inline event handler`);
+    assert.ok(!/\sstyle\s*=/i.test(html), `${page}: style attribute`);
+    assert.ok(!/(src|href)=["']https?:/i.test(html), `${page}: third-party asset`);
+    assert.ok(/<meta name="referrer" content="no-referrer">/.test(html), `${page}: referrer policy`);
+  }
+});
+
+test('nothing stores the session outside sessionStorage or reads cookies', () => {
+  for (const file of files(join(STATIC, 'js'), '.js')) {
+    const source = readFileSync(file, 'utf8');
+    assert.ok(!/document\.cookie/.test(source), `${file} touches cookies`);
+    if (/localStorage/.test(source)) {
+      assert.ok(!/session|token/i.test(source.match(/localStorage[^;]*/g).join(' ')), `${file} keeps a credential in localStorage`);
+    }
+  }
 });
 
 test('stylesheets do not import remote resources', () => {
@@ -46,4 +61,42 @@ test('stylesheets do not import remote resources', () => {
     const css = readFileSync(file, 'utf8');
     assert.ok(!/@import|url\(\s*['"]?https?:/i.test(css), `${file} loads a remote resource`);
   }
+});
+
+// ADR 0003: the workspace talks only to its own origin. A URL-shaped string is
+// allowed only when it is an identifier that is never requested, or one of the
+// official Ollama pages the user may open on purpose (item 6), kept in links.js.
+const NEVER_FETCHED = new Set(['http://www.w3.org/2000/svg']);
+const USER_LINKS = new Set(['https://ollama.com/download', 'https://docs.ollama.com/faq#how-do-i-disable-ollama-cloud-features']);
+const LINKS_MODULE = join(STATIC, 'js', 'links.js');
+
+test('sources contain no absolute URL other than never-fetched identifiers and the user links', () => {
+  const sources = [...files(join(STATIC, 'js'), '.js'), ...files(STATIC, '.html'), ...files(STATIC, '.svg'), ...files(STATIC, '.css')];
+  for (const file of sources) {
+    for (const match of readFileSync(file, 'utf8').matchAll(/https?:\/\/[^\s"'`<>)\]]*/gi)) {
+      const allowed = NEVER_FETCHED.has(match[0]) || (file === LINKS_MODULE && USER_LINKS.has(match[0]));
+      assert.ok(allowed, `${file} references ${match[0]}`);
+    }
+  }
+});
+
+test('external links open in a new tab without opener or referrer, and nothing fetches them', () => {
+  const source = readFileSync(LINKS_MODULE, 'utf8');
+  assert.match(source, /target: '_blank', rel: 'noopener noreferrer'/);
+  for (const file of files(join(STATIC, 'js'), '.js')) {
+    const text = readFileSync(file, 'utf8');
+    for (const name of ['OLLAMA_DOWNLOAD_URL', 'OLLAMA_LOCAL_ONLY_URL']) {
+      for (const use of text.matchAll(new RegExp(`.{0,40}${name}.{0,10}`, 'g'))) {
+        assert.ok(!/fetch|request\(|src:/.test(use[0]), `${file} fetches ${name}: ${use[0]}`);
+      }
+    }
+  }
+});
+
+test('the API client only requests same-origin /api/ paths', () => {
+  const client = readFileSync(join(STATIC, 'js', 'api.js'), 'utf8');
+  const paths = [...client.matchAll(/request\(\s*'[A-Z]+',\s*[`']([^`']+)[`']/g), ...client.matchAll(/post\(\s*[`']([^`']+)[`']/g)]
+    .map((match) => match[1]);
+  assert.ok(paths.length > 10, 'the client paths were found');
+  for (const path of paths) assert.ok(path.startsWith('/api/v1/'), `${path} is not a same-origin API path`);
 });

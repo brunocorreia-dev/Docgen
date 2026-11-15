@@ -1,7 +1,7 @@
 // Job timeline with live status, elapsed time and cancellation.
 import { h } from '../dom.js';
 import { icon } from '../icons.js';
-import { relativeTime } from '../format.js';
+import { providerLabel, relativeTime } from '../format.js';
 import { JOB_STATUS, JOB_TYPE, jobErrorMessage } from '../messages.js';
 import { elapsedSeconds } from '../jobs.js';
 
@@ -20,7 +20,7 @@ export function activityList(jobs, { onCancel } = {}) {
           h('strong', null, JOB_TYPE[job.type] || job.type),
           h('span', { class: 'activity-status' }, JOB_STATUS[job.status] || job.status)),
         h('small', { class: 'muted' }, [
-          job.provider === 'groq' ? 'Groq' : 'Ollama',
+          providerLabel(job.provider),
           job.model,
           relativeTime(job.createdAt),
           job.status === 'RUNNING' || job.finishedAt ? `${elapsedSeconds(job)} s` : null,

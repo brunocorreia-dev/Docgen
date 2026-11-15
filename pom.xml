@@ -6,7 +6,7 @@
 
     <groupId>com.docgen</groupId>
     <artifactId>docgen</artifactId>
-    <version>2.0.0</version>
+    <version>3.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>DocGen</name>
     <description>Secure documentation and architecture-planning engine, CLI, loopback REST API, web workspace and desktop launcher.</description>
@@ -34,6 +34,8 @@
         <maven.jar.version>3.5.0</maven.jar.version>
         <cyclonedx.version>2.9.2</cyclonedx.version>
         <pdfbox.version>3.0.8</pdfbox.version>
+        <!-- MIT. Hardware diagnosis of the desktop app only, so the CLI SBOM does not change. -->
+        <oshi.version>7.7.1</oshi.version>
     </properties>
 
     <dependencyManagement>

@@ -8,7 +8,6 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -18,53 +17,86 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.stream.Stream;
 
+/**
+ * Generates text with a model of the local Ollama service.
+ *
+ * <p>Every request carries an explicit context window ({@code num_ctx}). Without
+ * it Ollama uses a small default (4k tokens below 24 GiB of VRAM) and silently
+ * drops the start of longer prompts, which is where the security rules are; it
+ * also truncates when an explicit {@code num_ctx} is too small. The window is
+ * therefore sized from a conservative {@link PromptTokens} estimate plus room
+ * for the answer, capped at the model's maximum, and a prompt that does not fit
+ * fails before anything is sent. {@code num_predict} caps the answer at that
+ * reserved room, so generation can never push the prompt out of the window.</p>
+ *
+ * <p>Before anything is sent, {@code /api/show} also has to say the model runs
+ * on this computer ({@link RemoteModels}, ADR 0003). Models that can reason
+ * (Qwen3 and later) are asked not to, and any reasoning that still arrives,
+ * in Ollama's {@code thinking} field or as a leading {@code <think>} block, is
+ * dropped before the text reaches the documentation validator or the plan
+ * parser (ROADMAP §6.4).</p>
+ */
 public final class OllamaProvider implements LLMProvider {
-    private static final URI GENERATE_URL = URI.create("http://127.0.0.1:11434/api/generate");
-    private static final URI TAGS_URL = URI.create("http://127.0.0.1:11434/api/tags");
     private static final ObjectMapper MAPPER = new ObjectMapper();
     static final int MAX_STREAM_LINE_BYTES = 1024 * 1024;
     static final int MAX_STREAM_FRAGMENT_CHARACTERS = 512 * 1024;
     static final int MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
     static final int MAX_STREAM_LINES = 32_768;
+    /** Context reserved for the answer; also sent as {@code num_predict}. */
+    static final int OUTPUT_RESERVE_TOKENS = 8_192;
+    /** Windows are rounded up to this step so similar prompts reuse a loaded model instead of reloading it. */
+    static final int CONTEXT_STEP_TOKENS = 2_048;
+    /**
+     * Prompts tokenize at no more than about 6 bytes per token (code measured at
+     * 5.2); fewer evaluated tokens than one per this many bytes means Ollama
+     * dropped part of the prompt anyway.
+     */
+    static final int MAX_PLAUSIBLE_BYTES_PER_TOKEN = 24;
 
     private final String model;
+    private final OllamaEndpoint endpoint;
     private final HttpClient client;
+    private final OllamaClient ollama;
+    /** Looked up once: a provider serves a single operation for a single model. */
+    private ModelDescription description;
 
-    public OllamaProvider(String model) {
-        this(model, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3))
-                .proxy(DirectProxySelector.INSTANCE)
-                .build());
+    public OllamaProvider(String model, OllamaEndpoint endpoint) {
+        this(model, endpoint, OllamaClient.directClient());
     }
 
-    OllamaProvider(String model, HttpClient client) {
-        this.model = model;
+    OllamaProvider(String model, OllamaEndpoint endpoint, HttpClient client) {
+        this.model = Objects.requireNonNull(model, "model");
+        this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.client = client;
-    }
-
-    @Override
-    public boolean isRemote() {
-        return false;
-    }
-
-    @Override
-    public String describeDestination() {
-        return "Ollama at " + GENERATE_URL + " (local service; model " + model + ")";
+        this.ollama = new OllamaClient(endpoint, client);
     }
 
     @Override
     public String generateDocumentation(String prompt) throws Exception {
-        return generate(buildRequestBody(prompt, false));
+        return generate(prompt, false);
     }
 
     @Override
     public String generateStructured(String prompt) throws Exception {
-        return generate(buildRequestBody(prompt, true));
+        return generate(prompt, true);
     }
 
-    String buildRequestBody(String prompt, boolean json) throws IOException {
+    @Override
+    public void requireFits(String... prompts) throws Exception {
+        int maximum = maximumContextTokens();
+        for (String prompt : prompts) {
+            contextWindowFor(prompt, maximum, model);
+        }
+    }
+
+    String buildRequestBody(String prompt, boolean json, int contextTokens) throws IOException {
+        return buildRequestBody(prompt, json, contextTokens, false);
+    }
+
+    String buildRequestBody(String prompt, boolean json, int contextTokens, boolean modelCanThink) throws IOException {
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model", model);
         body.put("prompt", prompt);
@@ -72,16 +104,34 @@ public final class OllamaProvider implements LLMProvider {
         if (json) {
             body.put("format", "json");
         }
+        if (modelCanThink) {
+            // Reasoning would spend the answer budget and is never part of a document.
+            body.put("think", false);
+        }
+        ObjectNode options = body.putObject("options");
+        options.put("num_ctx", contextTokens);
+        options.put("num_predict", OUTPUT_RESERVE_TOKENS);
         return MAPPER.writeValueAsString(body);
     }
 
-    private String generate(String body) throws Exception {
-        ensureOllamaIsRunning();
+    /** The estimate plus the answer reserve, rounded up to {@link #CONTEXT_STEP_TOKENS}, never above the maximum. */
+    static int contextWindowFor(String prompt, int maximumContextTokens, String model) throws PromptTooLargeException {
+        long needed = (long) PromptTokens.estimate(prompt) + OUTPUT_RESERVE_TOKENS;
+        if (needed > maximumContextTokens) {
+            throw new PromptTooLargeException(model, needed, maximumContextTokens);
+        }
+        long rounded = (needed + CONTEXT_STEP_TOKENS - 1) / CONTEXT_STEP_TOKENS * CONTEXT_STEP_TOKENS;
+        return (int) Math.min(rounded, maximumContextTokens);
+    }
 
-        HttpRequest request = HttpRequest.newBuilder(GENERATE_URL)
+    private String generate(String prompt, boolean json) throws Exception {
+        int contextTokens = contextWindowFor(prompt, maximumContextTokens(), model);
+        boolean modelCanThink = description().thinking();
+
+        HttpRequest request = HttpRequest.newBuilder(endpoint.api("generate"))
                 .timeout(Duration.ofMinutes(10))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .POST(HttpRequest.BodyPublishers.ofString(buildRequestBody(prompt, json, contextTokens, modelCanThink)))
                 .build();
 
         HttpResponse<String> response = HttpExchange.send(client, request, responseInfo -> {
@@ -94,27 +144,66 @@ public final class OllamaProvider implements LLMProvider {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("Ollama generation failed with HTTP " + response.statusCode());
         }
-        return parseStreamingResponse(response.body().lines());
+        Generation generation = parseGeneration(response.body().lines());
+        requireWholePromptEvaluated(prompt, generation.promptTokens());
+        String answer = ThinkingFilter.strip(generation.text()).trim();
+        if (answer.isEmpty()) {
+            throw new IOException("Ollama returned an empty response.");
+        }
+        return answer;
     }
 
-    static HttpResponse.BodySubscriber<String> boundedResponseBodySubscriber(int maxBytes) {
-        return GroqProvider.boundedUtf8BodySubscriber(maxBytes, "Ollama");
-    }
-
-    private void ensureOllamaIsRunning() throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(TAGS_URL)
-                .timeout(Duration.ofSeconds(5))
-                .GET()
-                .build();
-        HttpResponse<Void> response = HttpExchange.send(
-                client, request, HttpResponse.BodyHandlers.discarding(), Duration.ofSeconds(5), "Ollama");
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("Ollama is not responding on http://127.0.0.1:11434 (HTTP "
-                    + response.statusCode() + ").");
+    /** Defense in depth for a server that ignores {@code num_ctx}; the sizing above is the primary control. */
+    static void requireWholePromptEvaluated(String prompt, Integer evaluatedTokens) throws PromptTruncatedException {
+        if (evaluatedTokens == null) {
+            return;
+        }
+        int bytes = prompt.getBytes(StandardCharsets.UTF_8).length;
+        if ((long) evaluatedTokens * MAX_PLAUSIBLE_BYTES_PER_TOKEN < bytes) {
+            throw new PromptTruncatedException(evaluatedTokens, bytes);
         }
     }
 
+    static HttpResponse.BodySubscriber<String> boundedResponseBodySubscriber(int maxBytes) {
+        return BoundedUtf8BodySubscriber.of(maxBytes, "Ollama");
+    }
+
+    private int maximumContextTokens() throws IOException, InterruptedException {
+        Integer maximum = description().contextLength();
+        if (maximum == null) {
+            throw new IOException("Ollama did not report the context window of model " + model + ".");
+        }
+        return maximum;
+    }
+
+    /** {@code /api/show}, once per provider; refuses a model that runs outside this computer. */
+    private ModelDescription description() throws IOException, InterruptedException {
+        if (description == null) {
+            ModelDescription described = ollama.describe(model);
+            RemoteModels.requireLocal(model, described.remote());
+            description = described;
+        }
+        return description;
+    }
+
+    /** The model's maximum context ({@code <architecture>.context_length} in {@code model_info}). */
+    static int parseContextLength(String showResponse, String model) throws IOException {
+        Integer length = OllamaClient.parseDescription(showResponse, model).contextLength();
+        if (length == null) {
+            throw new IOException("Ollama did not report the context window of model " + model + ".");
+        }
+        return length;
+    }
+
     static String parseStreamingResponse(Stream<String> lines) throws IOException {
+        return parseGeneration(lines).text();
+    }
+
+    /** The generated text and how many prompt tokens Ollama says it evaluated (absent in some responses). */
+    record Generation(String text, Integer promptTokens) {
+    }
+
+    static Generation parseGeneration(Stream<String> lines) throws IOException {
         if (lines == null) {
             throw new IOException("Ollama returned no response stream.");
         }
@@ -155,7 +244,7 @@ public final class OllamaProvider implements LLMProvider {
                 accumulator.acceptLine(decodeLine(line));
             }
         }
-        return accumulator.finish();
+        return accumulator.finish().text();
     }
 
     private static String decodeLine(ByteArrayOutputStream line) throws IOException {
@@ -197,6 +286,8 @@ public final class OllamaProvider implements LLMProvider {
         private final StringBuilder output = new StringBuilder();
         private boolean completed;
         private int linesSeen;
+        private long discardedReasoning;
+        private Integer promptTokens;
 
         private void acceptLine(String line) throws IOException {
             if (line == null) {
@@ -228,6 +319,17 @@ public final class OllamaProvider implements LLMProvider {
             if (!error.isMissingNode() && !error.isNull()) {
                 throw new IOException("Ollama reported an error.");
             }
+            JsonNode reasoning = node.path("thinking");
+            if (!reasoning.isMissingNode() && !reasoning.isNull()) {
+                // Discarded, never appended: reasoning is not documentation. It still counts toward the limit.
+                if (!reasoning.isTextual()) {
+                    throw new IOException("Ollama returned a non-text reasoning fragment.");
+                }
+                discardedReasoning += reasoning.asText().length();
+                if (discardedReasoning > DocumentationValidator.MAX_OUTPUT_CHARACTERS) {
+                    throw new IOException("Ollama output exceeded the safety limit.");
+                }
+            }
             JsonNode fragment = node.path("response");
             if (!fragment.isMissingNode() && !fragment.isTextual()) {
                 throw new IOException("Ollama returned a non-text response fragment.");
@@ -243,6 +345,14 @@ public final class OllamaProvider implements LLMProvider {
                 output.append(value);
             }
 
+            JsonNode evaluated = node.path("prompt_eval_count");
+            if (!evaluated.isMissingNode() && !evaluated.isNull()) {
+                if (!evaluated.isIntegralNumber() || !evaluated.canConvertToInt() || evaluated.asInt() < 0) {
+                    throw new IOException("Ollama returned an invalid prompt token count.");
+                }
+                promptTokens = evaluated.asInt();
+            }
+
             JsonNode done = node.path("done");
             if (!done.isMissingNode() && !done.isBoolean()) {
                 throw new IOException("Ollama returned an invalid completion marker.");
@@ -256,14 +366,14 @@ public final class OllamaProvider implements LLMProvider {
             }
         }
 
-        private String finish() throws IOException {
+        private Generation finish() throws IOException {
             if (!completed) {
                 throw new IOException("Ollama response ended without a completion marker.");
             }
             if (output.isEmpty()) {
                 throw new IOException("Ollama returned an empty response.");
             }
-            return output.toString().trim();
+            return new Generation(output.toString().trim(), promptTokens);
         }
     }
 

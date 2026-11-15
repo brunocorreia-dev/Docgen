@@ -32,11 +32,6 @@ public final class ProjectDocumentationService {
         public int characterCount() {
             return readmePrompt.length() + architecturePrompt.length();
         }
-
-        public String digest(ProviderSelection selection) {
-            return PromptDigest.of("documentation", selection.provider(), String.valueOf(selection.model()),
-                    readmePrompt, architecturePrompt);
-        }
     }
 
     public record Result(String readme, String architecture, String mermaid) {
@@ -56,15 +51,13 @@ public final class ProjectDocumentationService {
     public Result generate(
             Preparation preparation,
             ProviderSelection selection,
-            DocumentationService.RemoteConsent remoteConsent,
             DocumentationService.ProgressListener progressListener
     ) throws Exception {
         Objects.requireNonNull(preparation, "preparation");
         Objects.requireNonNull(selection, "selection");
-        Objects.requireNonNull(remoteConsent, "remoteConsent");
         Objects.requireNonNull(progressListener, "progressListener");
-        LLMProvider provider = RemoteGate.authorize(providerResolver, selection, remoteConsent,
-                0, preparation.characterCount());
+        LLMProvider provider = providerResolver.create(selection.model());
+        provider.requireFits(preparation.readmePrompt(), preparation.architecturePrompt());
         progressListener.generationStarted(DocumentationService.Artifact.README);
         String readme = validated(provider.generateDocumentation(preparation.readmePrompt()),
                 DocumentationArtifacts.README);

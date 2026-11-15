@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.docgen</groupId>
         <artifactId>docgen</artifactId>
-        <version>2.0.0</version>
+        <version>3.0.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>docgen-api</artifactId>
@@ -55,6 +55,12 @@
             <version>${pdfbox.version}</version>
         </dependency>
         <dependency>
+            <!-- CPU, memory, GPU and disk of this computer, read locally (no network). -->
+            <groupId>com.github.oshi</groupId>
+            <artifactId>oshi-core</artifactId>
+            <version>${oshi.version}</version>
+        </dependency>
+        <dependency>
             <!-- Static web workspace served same-origin from classpath:/static. -->
             <groupId>com.docgen</groupId>
             <artifactId>docgen-web</artifactId>
@@ -84,6 +90,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- The desktop launcher runs before Spring (single instance, free port, browser). -->
+                    <mainClass>com.docgen.desktop.DesktopLauncher</mainClass>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

@@ -6,18 +6,18 @@ O DocGen trata repositórios, descrições de projeto, PDFs anexados e respostas
 
 ### Documentação de repositórios (CLI e API de análise)
 
-O DocGen lê arquivos de texto do repositório e envia trechos selecionados e redigidos ao provedor configurado. Em cada uma das duas requisições de geração vão:
+O DocGen lê arquivos de texto do repositório e envia trechos selecionados e redigidos ao Ollama local, o único provedor. Em cada uma das duas requisições de geração vão:
 
 - o conteúdo redigido de cada arquivo incluído (limites rígidos de 20.000 caracteres por arquivo e 120.000 no total);
 - os caminhos relativos redigidos dos arquivos incluídos (também como árvore limitada);
 - nomes e motivos, limitados e redigidos, dos arquivos pulados por limite de conteúdo;
-- somente no Groq: o nome do modelo e a `GROQ_API_KEY` no cabeçalho de autorização, com destino a `https://api.groq.com`.
+- o nome do modelo e as opções `num_ctx` e `num_predict`.
 
-O Groq faz no máximo três tentativas por prompt após erros de limite de taxa ou de servidor. As requisições ao Ollama vão direto ao loopback IPv4 `http://127.0.0.1:11434`, com proxies da JVM desativados para esse cliente local sem TLS. Nomes de arquivos sensíveis, ignorados ou não suportados e snapshots de pré-visualização nunca entram em prompts. O endpoint `POST /api/v1/repositories/{id}/analysis` apenas analisa: não constrói provedor nem envia nada.
+As requisições vão direto ao loopback IPv4 `http://127.0.0.1` (porta padrão `11434`), com proxies da JVM desativados para esse cliente local sem TLS e sem seguir redirecionamentos. O host não é configurável. Nenhum conteúdo sai do computador. Nomes de arquivos sensíveis, ignorados ou não suportados e snapshots de pré-visualização nunca entram em prompts. O endpoint `POST /api/v1/repositories/{id}/analysis` apenas analisa: não constrói provedor nem envia nada.
 
 ### Projetos, PDFs e planejamento (DocGen Web)
 
-Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, tecnologias e restrições do projeto, mais o texto extraído dos PDFs (redigido, normalizado e limitado a um orçamento de 30.000 caracteres, com o prompt inteiro limitado a 64.000). Na geração de documentação vão os mesmos dados do projeto e o plano aprovado, sem o texto dos anexos. Antes de qualquer envio a um provedor remoto, o usuário vê o destino, o modelo, o tamanho exato em caracteres e a lista do que será incluído.
+Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, tecnologias e restrições do projeto, mais o texto extraído dos PDFs (redigido, normalizado e limitado a um orçamento de 30.000 caracteres, com o prompt inteiro limitado a 64.000). Na geração de documentação vão os mesmos dados do projeto e o plano aprovado, sem o texto dos anexos. Tudo vai apenas para o Ollama local.
 
 ## Controles do pipeline de repositórios, na ordem em que se aplicam
 
@@ -33,10 +33,10 @@ Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, t
    - negação em `.docgenignore` é rejeitada.
 5. **Allowlist opcional** `--include-ext`, que só restringe a seleção.
 6. **Redação de segredos** sobre o arquivo completo e limitado antes do truncamento, e sobre cada caminho e item de pulo visível no prompt.
-7. **Preflight:** depois da varredura (exceto em `--dry-run`), o par de documentação ou de pré-visualização é verificado antes de construir prompts ou inicializar provedores. Diretório ausente ou inseguro e conflito de sobrescrita falham aqui, sem chamada remota.
+7. **Preflight:** depois da varredura (exceto em `--dry-run`), o par de documentação ou de pré-visualização é verificado antes de construir prompts ou inicializar provedores. Diretório ausente ou inseguro e conflito de sobrescrita falham aqui, sem chamada ao modelo.
 8. **Fronteira do prompt:** o conteúdo vai embrulhado como dado não confiável, tags que imitam delimitadores são neutralizadas e as instruções são reafirmadas após o bloco.
-9. **Consentimento:** o serviço reutilizável exige permissão remota explícita e um callback de consentimento positivo antes de chamar o Groq. Na CLI, isso significa `--allow-remote` mais confirmação y/N, ou `--allow-remote` mais `--yes` sem console. `--yes` é exclusivo da CLI e não dá autoridade a nenhuma outra interface.
-10. **Validação do provedor:** corpos de erro são descartados, o acúmulo da resposta é limitado e os marcadores de conclusão do Groq e do Ollama precisam indicar resultado completo. A resposta NDJSON do Ollama tem teto de 16 MiB e é recebida dentro da troca HTTP com prazo.
+9. **Janela de contexto:** antes de enviar, o provedor obtém do Ollama o contexto máximo do modelo e calcula `num_ctx` com uma estimativa conservadora dos tokens do prompt mais a reserva da resposta. Se não couber, a operação falha antes de qualquer envio (`PromptTooLargeException`). Sem esse controle, o Ollama usa 4k tokens abaixo de 24 GiB de VRAM e corta em silêncio o início de prompts maiores, que é onde ficam as regras de segurança (medido: 109.951 caracteres viraram 2.050 tokens). `num_predict` limita a resposta à reserva, para que a geração não empurre o prompt para fora da janela.
+10. **Validação do provedor:** corpos de erro são descartados, o acúmulo da resposta é limitado e o marcador de conclusão do Ollama precisa indicar resultado completo. A resposta NDJSON tem teto de 16 MiB e é recebida dentro da troca HTTP com prazo. Se o `prompt_eval_count` informado for implausivelmente baixo para o tamanho do prompt, a resposta é descartada (`PromptTruncatedException`).
 11. **Validação da saída:** o texto gerado é redigido de novo, limitado a 2.000.000 caracteres, verificado quanto a Unicode e caracteres de controle, obrigado a começar com H1 e restrito a Markdown passivo com links web ou relativos.
 12. **Publicação transacional:** o writer repete o preflight, prepara as duas saídas por canais `CREATE_NEW` relativos a handles, força a gravação em disco onde há suporte e só então publica o par com reversão. O diretório de saída precisa existir e ser confiável e não compartilhado. Diretórios POSIX graváveis por grupo ou outros, caminhos com symlink ou não verificáveis são recusados. Destinos existentes exigem `--force`.
 13. **Inspeção:** `--dry-run` e `--preview-prompt` não contatam provedores. Pré-visualizações usam permissões privadas POSIX quando disponíveis e não são substituídas sem `--force`.
@@ -45,33 +45,51 @@ Num planejamento arquitetural vão ao provedor: nome, descrição, requisitos, t
 
 ### Exposição de rede
 
-- O servidor escuta só em `127.0.0.1` (`server.address`). Expor o DocGen em outras interfaces ou na internet não é suportado.
-- **Defesa contra DNS rebinding:** o `HostHeaderFilter` só atende requisições cujo host seja `localhost`, `127.0.0.1` ou `::1` (configurável em `docgen.api.allowed-hosts`); outros hosts recebem `400 invalid_host`.
+- O servidor escuta só em `127.0.0.1` (`server.address`), numa porta livre escolhida pelo sistema a cada início. Expor o DocGen em outras interfaces ou na internet não é suportado.
+- **Defesa contra DNS rebinding:** o `HostHeaderFilter` só atende requisições cujo `Host` seja exatamente `127.0.0.1:<porta>` ou `localhost:<porta>`, com a porta real do servidor. Outro nome (uma página cujo domínio passou a resolver para `127.0.0.1`), outra porta (uma página servida por outro serviço local) e `::1` (o servidor não escuta em IPv6) recebem `400 invalid_host`.
 - **CORS:** nenhuma origem cruzada é autorizada. Não existe configuração de CORS, preflights de outras origens não recebem `Access-Control-Allow-Origin` e o frontend é servido na mesma origem.
 
-### Autenticação
+### Autenticação (ADR 0002)
 
-- Credenciais definidas pelo operador em `DOCGEN_API_USERNAME` e `DOCGEN_API_PASSWORD` (mínimo de 12 caracteres), codificadas com BCrypt na inicialização. Usuários adicionais só existem para ambientes locais e testes (`docgen.api.additional-users`).
-- **Web:** `POST /api/v1/auth/token` emite um token opaco de 256 bits. O servidor guarda apenas o hash SHA-256, em memória, com expiração absoluta (8 h), por inatividade (30 min) e no máximo 10 tokens por usuário. O navegador guarda o token no `sessionStorage` da aba e o envia em `Authorization: Bearer`. Logout revoga o token, e reiniciar o servidor encerra todas as sessões.
-- **Scripts:** HTTP Basic continua aceito (stateless). Respostas 401 para o workspace (`X-DocGen-Client`) usam o desafio `Bearer`, para que o navegador nunca mostre o diálogo nativo de Basic nem guarde credenciais que possam ser reenviadas automaticamente.
-- **Força bruta:** o `ThrottledAuthenticationManager` aplica o mesmo bloqueio progressivo (30 s, dobrando até 15 min, após 5 falhas) ao Basic e ao endpoint de token, por nome de usuário. A mensagem de falha é a mesma para usuário inexistente e para senha errada.
-- Sem sessão HTTP (`STATELESS`), sem cookies, sem `formLogin`.
+Modelo de ameaça: páginas web abertas no mesmo navegador e outros usuários do mesmo computador estão em escopo; processos do **mesmo** usuário não (eles já leem o diretório de dados e o banco).
 
-### CSRF
+- **Sem contas nem senhas.** Não existe login, HTTP Basic nem `UserDetailsService` (a configuração automática do Spring Boot que geraria uma senha no log está excluída).
+- **Token de lançamento:** a cada janela, o launcher gera 256 bits aleatórios e abre `http://127.0.0.1:<porta>/launch#<token>`. O token é de uso único, vale 30 segundos, fica no servidor só como hash SHA-256 e no máximo 4 ficam pendentes. O fragmento (`#`) nunca vai ao servidor nem ao `Referer`, e a página o apaga da barra de endereços com `history.replaceState` antes de qualquer requisição.
+- **Detecção de reuso:** os hashes consumidos ficam guardados por 5 minutos. Uma segunda troca do mesmo token encerra a sessão criada pela primeira e responde `409 launch_token_reused`. O servidor não sabe qual das duas foi legítima, então encerra ambas: confidencialidade antes de disponibilidade.
+- **Sessão:** a página troca o token por um token de sessão opaco de 256 bits (`POST /api/v1/session`), guardado no servidor só como hash e só em memória: reiniciar o app encerra todas. Termina após 12 horas sem uso (o heartbeat da janela conta como uso); no máximo 8 sessões, e a mais antiga sai. O navegador guarda o token no `sessionStorage` da aba e o envia **apenas** em `Authorization: Bearer`.
+- **Nenhum cookie, em nenhuma rota.** Cookies não são isolados por porta (RFC 6265, §8.5): um cookie de `127.0.0.1` iria para qualquer outro serviço local. `sessionStorage` é isolado por origem (esquema, host e porta) e nunca é anexado automaticamente.
+- **Outro processo local sem o token não usa a API:** todas as rotas mapeadas, exceto `health`, a troca do token de lançamento e a reabertura, respondem `401` sem sessão, com token falso ou com Basic (`ProtectedRoutesTest`, que descobre as rotas sozinho).
+- **Reabertura:** a segunda execução do app lê o `instance.json` (porta, PID e um segredo de 256 bits; arquivo `0600` num diretório `0700`) e chama `POST /api/v1/desktop/reopen` com o segredo num cabeçalho, comparado em tempo constante. Essa rota não usa sessão e recusa qualquer requisição com `Origin` ou `Sec-Fetch-*`, ou seja, vinda de um navegador. Ela só abre uma nova janela, com um token novo, para o usuário do app.
+- Sem sessão HTTP (`STATELESS`), sem `formLogin`. Tokens e o segredo de instância nunca são registrados em log.
 
-O CSRF depende de o navegador anexar credenciais automaticamente. Aqui, nenhuma credencial é ambiente (não há cookies e o Basic nunca é armazenado pelo navegador). Além disso, o `RequestPolicyFilter` exige que todo `POST`, `PUT` ou `PATCH` em `/api/` declare um Content-Type não simples (`application/json`, ou `application/pdf` para upload). Um formulário cross-site não consegue enviar esses tipos sem preflight CORS, que nunca é concedido. Por isso os tokens CSRF baseados em cookie do Spring estão desativados, de forma deliberada e documentada em `SecurityConfig`.
+### CSRF e origem
+
+O CSRF depende de o navegador anexar credenciais automaticamente, e aqui nenhuma credencial é ambiente. Mesmo assim ficam duas defesas em profundidade:
+
+- o `OriginPolicyFilter`, antes da autenticação, recusa com `403 origin_rejected` todo `POST`, `PUT`, `PATCH` ou `DELETE` em `/api/` cujo `Origin` não seja a própria origem do app ou cujo `Sec-Fetch-Site` não seja `same-origin`, quando o navegador os envia;
+- o `RequestPolicyFilter` exige que todo `POST`, `PUT` ou `PATCH` em `/api/` declare um Content-Type não simples (`application/json`, ou `application/pdf` para upload). Um formulário cross-site não consegue enviar esses tipos sem preflight CORS, que nunca é concedido.
+
+Por isso os tokens CSRF baseados em cookie do Spring estão desativados, de forma deliberada e documentada em `SecurityConfig`.
 
 ### Autorização e isolamento
 
-- `/api/v1/**` exige o papel `ANALYST`, exceto `health`, `providers` e `auth/token`. Rotas desconhecidas são negadas (`denyAll`), e só os arquivos estáticos do workspace são públicos.
-- Todo recurso (projeto, anexo, plano, artefato, job) tem `owner`, e toda consulta filtra por `id` e `owner`. Recursos de outro usuário respondem `404`, sem revelar existência. IDs são UUIDs aleatórios validados antes de qualquer consulta.
+- `/api/v1/**` exige uma sessão (papel `LOCAL_SESSION`), exceto `GET health`, `POST session` e `POST desktop/reopen`. Rotas desconhecidas são negadas (`denyAll`), e só os arquivos estáticos do app e a página `/launch` são públicos.
+- O dono dos recursos é fixo (`local`). A coluna `owner` continua em todo recurso (projeto, anexo, plano, artefato, job), e toda consulta segue filtrando por `id` e `owner`, como segunda barreira: linhas de outro dono (por exemplo, de uma migração malfeita) respondem `404`, sem revelar existência. A migração `V3` passa os donos antigos da v2 para `local`. IDs são UUIDs aleatórios validados antes de qualquer consulta.
 - Repositórios do servidor só podem ser analisados por identificadores opacos mapeados pelo operador (`docgen.repositories`), com caminhos absolutos, normalizados e sem symlinks. Clientes nunca enviam caminhos.
+
+### Dados locais e ciclo de vida
+
+- Diretório de dados privado por SO (`0700` onde há POSIX, nunca um link simbólico): `$XDG_DATA_HOME/docgen` ou `~/.local/share/docgen` no Linux, `~/Library/Application Support/DocGen` no macOS e `%LOCALAPPDATA%\DocGen` no Windows (não `%APPDATA%`, que é copiado para o servidor em perfis móveis de domínio). No Windows a privacidade vem das ACLs herdadas do perfil do usuário.
+- Instância única por trava de arquivo do SO (`instance.lock`), liberada pelo próprio SO se o processo morrer.
+- "Apagar todos os meus dados" cancela as tarefas em andamento, apaga todas as linhas do dono numa transação, esvazia a área de staging e pede um `SHUTDOWN COMPACT` do H2 na saída (ou no próximo início, se o app for morto antes), porque linhas apagadas podem continuar em páginas livres do arquivo. Os logs técnicos são mantidos: eles nunca guardam prompts, respostas, anexos ou tokens.
+- Os dados não são criptografados em repouso; a criptografia de disco é a do sistema operacional.
+- O app se encerra sozinho após 10 minutos sem nenhuma janela aberta (heartbeat da UI), nunca durante uma geração.
 
 ### Validação de entrada e limites
 
 - DTOs separados do domínio, com Bean Validation (tamanhos, padrões, quantidade de itens). A rigidez do JSON é aplicada em código (`StrictJsonConfig`): propriedades desconhecidas, tokens excedentes, chaves duplicadas e `null` em primitivos falham; profundidade máxima de 32 e strings de até 256 KiB. O domínio (`ProjectBrief`) normaliza e limita de novo.
 - Tamanhos de corpo por rota, verificados pelo Content-Length e durante a leitura: 16 KiB (análise), 64 KiB (JSON em geral), 1 MiB (edição de documento) e 10 MiB (PDF).
-- Limites de recursos: 200 projetos por usuário, 5 anexos por projeto, 3 jobs ativos por usuário, fila de 16 jobs, 2 workers, timeout de 15 min por job, 60 s e 200 páginas por PDF.
+- Limites de recursos: 200 projetos, 5 anexos por projeto, 3 jobs ativos, fila de 16 jobs, 2 workers, timeout de 15 min por job, 60 s e 200 páginas por PDF.
 
 ### Upload e processamento de PDF
 
@@ -82,16 +100,15 @@ O CSRF depende de o navegador anexar credenciais automaticamente. Aqui, nenhuma 
 - O texto extraído é normalizado (controles e caracteres invisíveis removidos) e redigido antes de ser persistido. O arquivo temporário é apagado em qualquer desfecho, e o staging é limpo na inicialização.
 - Duplicatas (mesmo SHA-256 no projeto) são rejeitadas. Os logs do PDFBox ficam em `ERROR`, para não registrar detalhes derivados do documento.
 
-### Consentimento para transmissão remota
+### Somente local
 
-- **Gate do operador:** provedores remotos ficam indisponíveis a menos que o servidor rode com `DOCGEN_ALLOW_REMOTE=true`.
-- **Consentimento por operação:** `POST /projects/{id}/transmission-previews` monta o prompt exato, mostra destino, modelo, tamanho e dados incluídos, e devolve um token de uso único, válido por 10 min, amarrado a usuário, projeto, operação (`PLAN` ou `DOCUMENTATION`), provedor, modelo e **SHA-256 do prompt**. O job só é aceito com esse token; qualquer mudança no projeto, nos anexos ou no plano muda o digest e gera `409 consent_stale`. Tokens são consumidos mesmo quando a verificação falha.
-- O consentimento é distinto da autenticação: estar logado não autoriza envio nenhum. O diálogo do workspace só habilita "Autorizar e enviar" depois que o usuário marca a caixa de autorização, e cancelar não transmite nada.
-- Provedores locais (Ollama) não exigem token: os dados não saem da máquina.
-
-### Credenciais de provedores
-
-`GROQ_API_KEY` é lida apenas do ambiente do servidor e usada só no cabeçalho para `https://api.groq.com`. O navegador nunca a recebe: `GET /providers` informa apenas se ela existe (`configured`). Os endpoints dos provedores são fixos no código, e nenhuma URL de provedor vem de requisição.
+- O único provedor é o Ollama em `127.0.0.1`. O host é o literal de loopback, sem resolução de nome e sem configuração; só a porta muda (`docgen.ollama.port`, padrão `11434`). Não existe provedor remoto, chave de API nem consentimento de envio, porque nada sai do computador.
+- Um modelo que não está instalado gera erro (`model_not_installed`), e o DocGen nunca pede download ao Ollama por conta própria.
+- **Modelos que rodam fora do computador** (ADR 0003, Fase 3), em camadas: (1) o gerenciador de modelos e o onboarding só baixam, testam e aceitam como padrão as tags do catálogo versionado (`models/qwen-catalog.json`), todas da biblioteca oficial, sem host nem `cloud` (o campo de modelo dos projetos da Engenharia ainda aceita qualquer nome e passa à lista do catálogo na Fase 6; até lá, a camada 2 o cobre); (2) antes de qualquer geração, o `/api/show` precisa dizer que o modelo é local: `remote_host` ou `remote_model` preenchidos, ou uma tag `cloud`, recusam o modelo (`remote_model_refused`) na CLI, na Engenharia e no teste de inferência, e um pedaço do stream do chat que declare `remote_host` encerra a resposta; (3) os sinais foram verificados no código do Ollama e empiricamente no 0.32.11, com fixtures das respostas reais; (4) nada depende de `OLLAMA_NO_CLOUD`; (5) o onboarding recomenda o modo só local, com link para a documentação oficial.
+- **Download de modelo, a única exceção.** Quem baixa é o próprio Ollama (`/api/pull`), da biblioteca oficial (`registry.ollama.ai`), e só depois de um clique numa janela que diz o que será baixado, de onde, o tamanho e o espaço livre. O DocGen recusa tags fora do catálogo, modelos já instalados e downloads que claramente não cabem no disco (`507 insufficient_disk`). Cancelar fecha a conexão, o que para o download no Ollama (verificado no 0.32.11).
+- **Diagnóstico de hardware sem rede.** O OSHI lê CPU, memória, GPU e disco localmente. O único programa externo é o `nvidia-smi` opcional: caminho fixo ou resolvido em entradas absolutas do `PATH`, sem shell, argumentos fixos, timeout de 3 s e saída limitada a 16 KiB.
+- **Links externos da interface:** só duas páginas oficiais do Ollama (download e modo só local), que o usuário abre por conta própria numa aba nova, com `rel="noopener noreferrer"`. O app nunca as requisita, e os testes Java e JS reprovam qualquer outro endereço externo ou o uso desses fora de `links.js`.
+- `LocalOnlyArchitectureTest` reprova o build quando o código de produção de qualquer módulo contém uma URI HTTP(S) fora do loopback (salvo identificadores que nunca são buscados, como o namespace do SVG, e os dois links acima em `links.js`), usa APIs de conexão fora do cliente Ollama ou implementa outro `LLMProvider`. A varredura não prova a ausência de tráfego em tempo de execução, mas impede as regressões óbvias. Os testes do frontend fazem o mesmo para URLs absolutas e caminhos fora de `/api/v1/`.
 
 ### Proteção contra XSS e conteúdo ativo
 
@@ -193,12 +210,16 @@ Abra um security advisory privado ou contate o proprietário do repositório ant
 ## Limitações conhecidas
 
 - **A redação de segredos é baseada em padrões.** Ela cobre formatos comuns de tokens de nuvem e SaaS (AWS, Google, GitHub, GitLab, Slack, Stripe, SendGrid, Twilio, npm, PyPI, Hugging Face, DigitalOcean, Shopify, Azure, JWTs, blocos de chave privada, credenciais em URLs e em atribuições), mas não reconhece formatos proprietários ou sem prefixo, segredos divididos em linhas nem valores codificados ou ofuscados. Isso vale também para PDFs: não anexe documentos com credenciais. Use `.docgenignore`, `--dry-run` e `--preview-prompt` para inspecionar antes de enviar.
+- **A janela de contexto vem de uma estimativa.** O Ollama não oferece contagem exata de tokens, então o `num_ctx` sai de uma estimativa calibrada contra o tokenizador Qwen2.5. Ela ficou acima da contagem real em todas as classes de texto medidas (código, prosa, JSON, CJK, emoji, base64, hex, números e pontuação), mas um modelo de outra família ou um texto fora dessas classes pode tokenizar pior. A checagem do `prompt_eval_count` é a segunda barreira e só detecta truncamentos grandes.
+- **A recusa de modelos remotos depende do que o Ollama declara.** O DocGen recusa modelos com `remote_host`/`remote_model` ou tag `cloud`, como o Ollama 0.32.11 os apresenta. Uma versão futura do Ollama que mude esses sinais pode exigir revisão; o catálogo continua sendo a primeira barreira no app, mas a CLI aceita qualquer `--model`. Ligar o modo só local do próprio Ollama (`OLLAMA_NO_CLOUD=1`, segundo a documentação oficial) fecha essa porta para todos os programas.
+- **O diagnóstico de hardware é uma estimativa.** VRAM sem confirmação do driver não entra na conta (o modelo vai para a classe "só CPU"), Apple Silicon usa uma fração presumida de dois terços da memória (a Apple não documenta o valor) e a pasta de modelos do Ollama é procurada nos lugares documentados; se não for encontrada, o espaço livre mostrado é o da pasta pessoal, e a interface diz isso.
 - **As defesas contra prompt injection são mitigações, não garantias.** Delimitadores de dado não confiável, neutralização de tags e reforço após o bloco reduzem a chance de o conteúdo (do repositório ou de um PDF) direcionar o modelo, mas nenhum prompt elimina esse risco.
 - **A validação garante forma, não verdade.** Planos e documentos podem conter erros, recomendações inadequadas ou conteúdo de engenharia social. A aprovação de um plano registra que alguém o revisou; não o torna correto.
 - **`.docgenignore` não suporta negação.** Os padrões só excluem; uma linha com `!` faz a varredura falhar em vez de ser ignorada em silêncio.
 - **A travessia segura não é portável para todo sistema de arquivos.** Provedores sem `SecureDirectoryStream` falham fechados. Symlinks e renomeações de ancestrais são contidos, mas o Java NIO portátil não distingue hardlink ou bind mount de um inode legítimo dentro da raiz; não analise repositórios graváveis por um usuário local não confiável.
 - **A escrita do par é reversível, não um journal contra quedas.** Sincronizações reduzem perdas, mas uma falha abrupta entre publicações pode deixar um arquivo de recuperação ou um par misto que exige inspeção manual. O NIO portátil também não tem unlink ou chmod condicionais por identidade, não preserva todos os ACLs e xattrs e não se defende de um processo hostil da mesma conta alterando um diretório compartilhado entre as verificações. Use um diretório de saída existente, confiável e não compartilhado; em POSIX, ele não pode ser gravável por grupo ou outros usuários.
-- **A aplicação web é local e de baixa escala.** Sessões, consentimentos e o controle de tentativas ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token web fica no `sessionStorage` da aba, então um XSS poderia lê-lo; a CSP estrita e a ausência de sinks HTML são as mitigações.
+- **O token de lançamento aparece na linha de comando do navegador** até ser trocado. No Linux, outro usuário do mesmo computador pode ler `/proc/<pid>/cmdline` e tentar usá-lo primeiro. Uso único, 30 segundos e a detecção de reuso **detectam e cortam** esse acesso, mas não impedem os segundos entre o roubo e a chegada da página legítima; o mesmo reuso também permite a esse usuário derrubar a sessão legítima. Em computadores compartilhados, montar `/proc` com `hidepid=2` remove essa exposição.
+- **A aplicação é local e de baixa escala.** Sessões ficam em memória e se perdem ao reiniciar. Não há HTTPS (o tráfego fica no loopback). O token de sessão fica no `sessionStorage` da aba, então um XSS ou uma extensão do navegador com acesso à página poderia lê-lo; a CSP estrita, a ausência de sinks HTML e a sessão que morre com o app são as mitigações.
 - **PDFs:** sem OCR; o texto pode sair fora de ordem em layouts complexos; o limite de 200.000 caracteres trunca documentos longos, e isso é sinalizado na interface.
 - **A verificação de assinatura é tão forte quanto o workflow.** A assinatura keyless autentica a identidade do `release.yml` e a tag; a garantia de que os bytes assinados vieram do build depende de revisar esse workflow. Ela não comprova a ausência de código malicioso no repositório naquela tag.
 

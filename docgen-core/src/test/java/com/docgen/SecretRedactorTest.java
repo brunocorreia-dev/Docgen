@@ -14,13 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SecretRedactorTest {
     @Test
     void redactsKnownTokenFormatsAndAssignments() {
-        String groq = "gsk_" + "abcdefghijklmnopqrstuvwxyz123456";
+        String gskKey = "gsk_" + "abcdefghijklmnopqrstuvwxyz123456";
         String aws = "AKIA" + "1234567890ABCDEF";
-        String input = "GROQ=" + groq + "\npassword = super-secret\nAWS=" + aws;
+        String input = "LLM_KEY=" + gskKey + "\npassword = super-secret\nAWS=" + aws;
 
         String redacted = SecretRedactor.redact(input);
 
-        assertFalse(redacted.contains(groq));
+        assertFalse(redacted.contains(gskKey));
         assertFalse(redacted.contains("super-secret"));
         assertFalse(redacted.contains(aws));
         assertTrue(redacted.contains("[REDACTED_SECRET]"));

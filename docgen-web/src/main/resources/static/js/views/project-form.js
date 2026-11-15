@@ -34,7 +34,7 @@ function field({ name, label, hint, control, max, counter }) {
     error);
 }
 
-export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar projeto', onSubmit, showDemo = false }) {
+export function projectForm({ initial = {}, submitLabel = 'Criar projeto', onSubmit, showDemo = false }) {
   const values = {
     name: initial.name ?? '',
     description: initial.description ?? '',
@@ -42,7 +42,6 @@ export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar
     nonFunctionalRequirements: (initial.nonFunctionalRequirements ?? []).join?.('\n') ?? initial.nonFunctionalRequirements ?? '',
     preferredTechnologies: (initial.preferredTechnologies ?? []).join?.(', ') ?? initial.preferredTechnologies ?? '',
     constraints: (initial.constraints ?? []).join?.('\n') ?? initial.constraints ?? '',
-    provider: initial.provider ?? 'ollama',
     model: initial.model ?? '',
     outputLanguage: initial.outputLanguage ?? 'pt-BR',
   };
@@ -54,36 +53,14 @@ export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar
     nonFunctionalRequirements: h('textarea', { id: 'field-nonFunctionalRequirements', rows: 3, value: values.nonFunctionalRequirements, placeholder: 'Desempenho, segurança, disponibilidade… (um por linha)' }),
     preferredTechnologies: h('input', { id: 'field-preferredTechnologies', type: 'text', value: values.preferredTechnologies, placeholder: 'Separadas por vírgula: Java, Spring Boot, PostgreSQL' }),
     constraints: h('textarea', { id: 'field-constraints', rows: 3, value: values.constraints, placeholder: 'Orçamento, prazos, infraestrutura obrigatória… (uma por linha)' }),
-    model: h('input', { id: 'field-model', type: 'text', value: values.model, maxlength: 100, list: 'model-suggestions', placeholder: 'Padrão do provedor', autocomplete: 'off' }),
+    model: h('input', { id: 'field-model', type: 'text', value: values.model, maxlength: 100, list: 'model-suggestions', placeholder: 'Modelo padrão do DocGen', autocomplete: 'off' }),
     outputLanguage: h('select', { id: 'field-outputLanguage' },
       h('option', { value: 'pt-BR', selected: values.outputLanguage === 'pt-BR' }, 'Português (Brasil)'),
       h('option', { value: 'en', selected: values.outputLanguage === 'en' }, 'English')),
   };
 
-  const providerInputs = [];
-  const providerCards = (providers.length ? providers : [
-    { id: 'ollama', remote: false, enabled: true, defaultModel: 'llama3.2' },
-    { id: 'groq', remote: true, enabled: true, defaultModel: 'llama-3.3-70b-versatile' },
-  ]).map((provider) => {
-    const input = h('input', { type: 'radio', name: 'provider', value: provider.id, checked: values.provider === provider.id });
-    providerInputs.push(input);
-    input.addEventListener('change', () => {
-      controls.model.placeholder = `Padrão: ${provider.defaultModel}`;
-    });
-    if (values.provider === provider.id) controls.model.placeholder = `Padrão: ${provider.defaultModel}`;
-    return h('label', { class: ['provider-card', !provider.enabled && 'is-disabled'] },
-      input,
-      h('span', { class: 'provider-card-body' },
-        h('span', { class: 'provider-card-title' }, icon(provider.remote ? 'cloud' : 'server'),
-          provider.id === 'groq' ? 'Groq' : 'Ollama'),
-        h('span', { class: 'provider-card-text' }, provider.remote
-          ? 'Remoto (api.groq.com). Pede seu consentimento antes de cada envio.'
-          : 'Local (127.0.0.1:11434). Os dados não saem da sua máquina.'),
-        !provider.enabled ? h('span', { class: 'provider-card-warning' }, 'Desativado no servidor') : null));
-  });
-
   const suggestions = h('datalist', { id: 'model-suggestions' },
-    ['llama3.2', 'llama3.1:8b', 'qwen2.5-coder', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
+    ['qwen2.5-coder:7b', 'qwen2.5-coder:3b', 'qwen2.5-coder:14b']
       .map((model) => h('option', { value: model })));
 
   const form = h('form', { class: 'project-form', novalidate: true },
@@ -105,10 +82,8 @@ export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar
         field({ name: 'constraints', label: 'Restrições técnicas', control: controls.constraints }))),
     h('section', { class: 'form-section' },
       h('h3', { class: 'form-section-title' }, h('span', { class: 'step-dot' }, '3'), 'Inteligência artificial'),
-      h('div', { class: 'field', dataset: { field: 'provider' } },
-        h('span', { class: 'field-label' }, 'Provedor'),
-        h('div', { class: 'provider-grid', role: 'radiogroup', 'aria-label': 'Provedor de IA' }, providerCards),
-        h('p', { class: 'field-error', role: 'alert' })),
+      h('p', { class: 'field-hint local-model-note' }, icon('server', { size: 15 }),
+        'Os modelos rodam no Ollama deste computador (127.0.0.1). Nada é enviado para serviços externos.'),
       h('div', { class: 'form-grid' },
         field({ name: 'model', label: 'Modelo', hint: 'Opcional. Deixe em branco para usar o modelo padrão.', control: controls.model }),
         field({ name: 'outputLanguage', label: 'Idioma da documentação', control: controls.outputLanguage })),
@@ -123,7 +98,6 @@ export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar
         control.dispatchEvent(new Event('input'));
       }
     }
-    providerInputs.forEach((input) => { input.checked = input.value === data.provider; });
   }
 
   function read() {
@@ -134,7 +108,7 @@ export function projectForm({ initial = {}, providers = [], submitLabel = 'Criar
       nonFunctionalRequirements: controls.nonFunctionalRequirements.value,
       preferredTechnologies: controls.preferredTechnologies.value,
       constraints: controls.constraints.value,
-      provider: providerInputs.find((input) => input.checked)?.value,
+      provider: 'ollama',
       model: controls.model.value,
       outputLanguage: controls.outputLanguage.value,
     });
