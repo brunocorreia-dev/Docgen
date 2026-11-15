@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=DocGen
+GenericName=Assistente de documentação
+Comment=Seu assistente local e gratuito.
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Development;Documentation;
+Keywords=documentação;arquitetura;IA;local;documentation;architecture;
+StartupNotify=true
+StartupWMClass=com-docgen-launcher-DocGenLauncher

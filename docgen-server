@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Development helper: starts the DocGen desktop app from a source checkout.
+# The app needs no environment variables: it picks a free port on 127.0.0.1,
+# keeps one instance per user and opens an authorized window in the browser.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JAR="$SCRIPT_DIR/docgen-api/target/docgen-api.jar"
+if [[ ! -f "$JAR" ]]; then
+  echo "docgen-server: $JAR not found — run 'mvn package' first." >&2
+  exit 1
+fi
+exec java -jar "$JAR" "$@"
