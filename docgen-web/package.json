@@ -1,0 +1,12 @@
+{
+  "name": "docgen-web",
+  "private": true,
+  "description": "DocGen Web workspace. Framework-free ES modules; tests use only the built-in node:test runner.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test src/test/js/*.test.mjs"
+  }
+}

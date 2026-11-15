@@ -1,0 +1,10 @@
+server:
+  # MockMvc tests start no server; requests address this port (see LoopbackMockMvc).
+  port: 18080
+docgen:
+  repositories: {}
+  storage:
+    in-memory: true
+  jobs:
+    workers: 2
+    timeout: 20s
