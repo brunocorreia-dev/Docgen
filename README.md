@@ -1,152 +1,338 @@
+<div align="center">
+
 # DocGen
 
-DocGen is a Java 21 CLI that scans a repository and generates two documentation files with an LLM:
+**Plataforma em Java 21 para documentação e planejamento de arquitetura de software assistidos por IA, com segurança como padrão: CLI, API REST, workspace web e aplicativo desktop local.**
 
-- `README.md`
-- `ARCHITECTURE.md`
+[![CI](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml/badge.svg)](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml)
+![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Maven](https://img.shields.io/badge/Maven-3.9%2B-C71A36?logo=apachemaven&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![Frontend](https://img.shields.io/badge/frontend-HTML%20%7C%20CSS%20%7C%20ES%20Modules-7C3AED)
+![LLM](https://img.shields.io/badge/LLM-Ollama%20local-4B5563)
+![SBOM](https://img.shields.io/badge/SBOM-CycloneDX%201.6-0B5FFF)
+![Assinatura](https://img.shields.io/badge/assinatura-Sigstore-2E2E2E)
 
-It supports Groq as a remote provider and Ollama as a local provider.
+[Visão geral](#visão-geral) ·
+[Funcionalidades](#principais-funcionalidades) ·
+[Instalação](#instalação) ·
+[Uso](#guia-de-utilização) ·
+[DocGen Web](#docgen-web) ·
+[Desktop](#docgen-desktop) ·
+[API REST](#api-rest) ·
+[CLI](#referência-completa-da-cli) ·
+[Segurança](#segurança) ·
+[Arquitetura](#arquitetura-do-projeto) ·
+[Qualidade](#testes-e-qualidade)
 
-## Security defaults
+</div>
 
-DocGen is designed to avoid the main foot-guns in automated documentation generation:
+> [!NOTE]
+> **Em desenvolvimento (3.0.0-SNAPSHOT):** o DocGen está sendo realinhado como um aplicativo desktop de IA local e gratuito, com modelos Qwen via Ollama. Desde esta versão, **todo o processamento é local**: não existe mais provedor remoto. O launcher e a configuração de modelos estão implementados; o chat e os instaladores seguem planejados.
 
-- Groq requires `--allow-remote` because repository content is sent to a remote API. Interactive runs additionally ask for confirmation before anything is sent; runs without a console (such as CI and many IDE launches) must also pass `--yes`. `--yes` never replaces `--allow-remote`.
-- Groq API keys are read only from `GROQ_API_KEY`, not from CLI arguments.
-- Known secrets are redacted before prompt construction (common cloud/SaaS token formats, private key blocks, credential assignments, URLs with embedded passwords).
-- Sensitive files such as `.env`, private keys and credential files are skipped and can never be re-included, not even via `--include-ext`.
-- Root and nested `.gitignore` files are honored, and a root `.docgenignore` can exclude anything you decide must never be scanned; excluded names are not mentioned inside prompts.
-- Repository traversal and output writes require secure, handle-relative filesystem operations. Symlinks in the root, any ancestor, directory, file, ignore file, or output path are never followed. The output directory must already exist, be trusted and non-shared, and, on POSIX filesystems, must not be writable by group or other users.
-- `--dry-run` shows exactly which files would be included or excluded without contacting any provider; `--preview-prompt` writes the exact prompts with owner-only permissions where POSIX attributes are available and does not replace an existing preview unless `--force` is supplied.
-- Existing `README.md` and `ARCHITECTURE.md` are not overwritten unless `--force` is provided.
-- Missing/insecure output directories and overwrite conflicts fail before prompt construction or provider initialization; the final write revalidates the same conditions against races.
-- Repository content is delimited as untrusted inside prompts, delimiter-lookalike tags in file content are neutralized, and the security rules are restated after the content block to reduce prompt-injection risk.
-- Model responses must be complete, are redacted again, and must pass a bounded passive-Markdown contract before either output file is written.
+| Entrega | Status nesta branch |
+|---|---|
+| Fase 1 · somente Ollama local | ✅ Implementado |
+| Fase 2 · launcher desktop sem login | ✅ Implementado |
+| Fase 3 · onboarding, catálogo e Modelos | ✅ Implementado; aguarda integração em `main` |
+| Fase 4 · chat local | 🗺️ Planejado |
+| Fase 5 · anexos no chat | 🗺️ Planejado |
+| Fase 6 · Engenharia integrada ao chat | 🗺️ Planejado |
+| Fase 7 · instaladores | 🗺️ Planejado |
 
-These controls reduce risk, but they are not a substitute for reviewing generated documentation before publishing it. See [SECURITY.md](SECURITY.md) for the exact data-egress list and the known limits of each control.
+---
 
-## Requirements
+## Sumário
 
-- Java 21+
-- Maven 3.9+ to build from source
-- A filesystem whose Java provider implements `SecureDirectoryStream`; DocGen fails closed instead of using an insecure fallback
-- An existing, trusted output directory; on POSIX it must not be group/world-writable
-- One provider:
-  - Groq API key in `GROQ_API_KEY`, or
-  - Ollama running locally on `http://127.0.0.1:11434`
+- [Visão geral](#visão-geral)
+- [Principais funcionalidades](#principais-funcionalidades)
+- [Tecnologias utilizadas](#tecnologias-utilizadas)
+- [Como o DocGen funciona](#como-o-docgen-funciona)
+- [Pré-requisitos](#pré-requisitos)
+- [Instalação](#instalação)
+- [Guia de utilização](#guia-de-utilização)
+- [Referência completa da CLI](#referência-completa-da-cli)
+- [DocGen Web](#docgen-web)
+- [DocGen Desktop](#docgen-desktop)
+- [API REST](#api-rest)
+- [Segurança](#segurança)
+- [Configuração da análise](#configuração-da-análise)
+- [Arquitetura do projeto](#arquitetura-do-projeto)
+- [Testes e qualidade](#testes-e-qualidade)
+- [Distribuição e integridade](#distribuição-e-integridade)
+- [Limitações conhecidas](#limitações-conhecidas)
+- [Evolução do projeto](#evolução-do-projeto)
+- [Autor](#autor)
 
-## Build
+## Visão geral
 
-```sh
-mvn -B test
-mvn -B package
+O **DocGen** nasceu como uma aplicação de linha de comando que lê um repositório local, seleciona os arquivos de texto relevantes e usa um modelo de linguagem (LLM) para redigir dois documentos:
+
+| Documento | Conteúdo |
+|---|---|
+| `README.md` | Documentação geral do projeto. |
+| `ARCHITECTURE.md` | Documentação da arquitetura de software. |
+
+## O que é o DocGen
+
+Rodar uma IA no próprio computador ainda é coisa de quem domina o terminal: é preciso instalar um servidor de modelos,
+escolher entre dezenas de versões sem saber se a máquina aguenta, baixar arquivos de vários gigabytes por linha de
+comando e conversar numa janela de texto.
+
+O DocGen quer tornar isso simples. A proposta é um aplicativo que você instala como qualquer outro. Ao abrir, ele
+verifica o hardware do seu computador, recomenda um modelo de IA **Qwen** que caiba nele, baixa esse modelo com a ajuda
+do [Ollama](https://ollama.com) e deixa você conversar. Tudo roda na sua máquina: suas conversas e seus arquivos não
+vão para a nuvem.
+
+O app serve para o dia a dia (tirar dúvidas, escrever textos, estudar, organizar ideias) e também para quem desenvolve
+software. Para esse público, o mesmo chat ganha ferramentas para explicar código, analisar requisitos e gerar
+documentação como `README.md` e `ARCHITECTURE.md`.
+
+## Princípios
+
+- **Local primeiro.** Nada sai do seu computador. A única exceção é o download de um modelo, feito pelo próprio Ollama
+  e só quando você pede. Hoje isso é feito com o comando `ollama pull`; no app, será um clique numa tela que avisa de
+  onde vem o download e qual o tamanho.
+- **Gratuito.** Sem assinatura e sem recurso pago.
+- **Código aberto.** O código é público no GitHub. A licença ainda não foi definida (veja [Licença](#licença)).
+- **Privacidade.** Sem telemetria, sem analytics e sem carregar nada de fora na interface.
+- **Sem terminal para quem só quer usar.** Essa é a meta do app desktop. Hoje o DocGen ainda é usado pela linha de
+  comando.
+- **Segurança e transparência.** O que não pode ser verificado com segurança falha em vez de seguir adiante, e o status
+  de cada recurso fica claro neste README.
+
+## Funcionalidades
+
+| Funcionalidade | Descrição | Status |
+|---|---|---|
+| Documentação de repositórios pela CLI | Gera `README.md` e `ARCHITECTURE.md` de um repositório local com um modelo do Ollama (padrão: `qwen2.5-coder:7b`). | ✅ Disponível |
+| Janela de contexto explícita | Cada pedido informa ao Ollama o contexto necessário. Se o conteúdo não couber no modelo, a geração para antes de enviar qualquer coisa. | ✅ Disponível |
+| Inspeção antes de gerar | `--dry-run` mostra os arquivos escolhidos e `--preview-prompt` grava o prompt exato, sem chamar a IA. | ✅ Disponível |
+| Workspace web para desenvolvedores | Interface local em `127.0.0.1` com projetos, anexos PDF, plano de arquitetura com revisão humana, diagrama e geração, edição e exportação de documentos. Ainda exige usuário e senha por variável de ambiente; isso é temporário. | ✅ Disponível |
+| Proteções de segurança | Leitura segura de repositórios, redação de segredos, isolamento contra *prompt injection*, saída restrita a Markdown passivo e IA acessada só em loopback. | ✅ Disponível |
+| App desktop sem login | Abrir o DocGen como um aplicativo, sem senha nem variáveis de ambiente, com instância única e encerramento limpo. | 🚧 Em desenvolvimento: desenho aprovado, implementação ainda não começou |
+| Diagnóstico de hardware | Detectar CPU, memória, GPU e espaço em disco, mostrando "não detectado" quando não for possível. | 🗺️ Planejado |
+| Recomendação de modelos Qwen | Indicar quais modelos o seu computador aguenta, e por quê. | 🗺️ Planejado |
+| Gerenciador de modelos | Baixar com progresso real, cancelar, remover e testar modelos. | 🗺️ Planejado |
+| Bloqueio de modelos de nuvem do Ollama | Impedir o uso de modelos que o Ollama executa fora do computador. | 🗺️ Planejado |
+| Chat local | Conversas com respostas em tempo real, histórico salvo no computador e botão de parar. | 🗺️ Planejado |
+| Anexos no chat | PDF e Markdown na conversa, tratados como dado não confiável. | 🗺️ Planejado |
+| Ferramentas de engenharia no app | Planejamento de arquitetura e documentação dentro do app, a partir do chat. | 🗺️ Planejado |
+| Instaladores | `.deb`, `.rpm`, `.msi` ou `.exe` e `.dmg`. | 🗺️ Planejado |
+| Site oficial | Apresentação, downloads e tutoriais. Hoje existe só uma página provisória em `site/`. | 🗺️ Planejado |
+
+## Como funciona
+
+```mermaid
+flowchart LR
+    U["Você"]
+    subgraph PC["Seu computador"]
+        CLI["CLI docgen"]
+        WEB["Workspace web"]
+        APP["App desktop"]
+        API["Backend Java<br/>127.0.0.1"]
+        CORE["Núcleo docgen-core"]
+        DB[("Dados locais<br/>H2")]
+        OLLAMA["Ollama<br/>127.0.0.1:11434"]
+        MODELS[("Modelos Qwen<br/>no disco")]
+    end
+    U --> CLI
+    U --> WEB
+    U -.-> APP
+    WEB --> API
+    APP -.-> API
+    CLI --> CORE
+    API --> CORE
+    API --> DB
+    CORE -->|"só loopback"| OLLAMA
+    OLLAMA --> MODELS
 ```
 
-The executable JAR is created at `target/docgen.jar`.
+Linhas contínuas mostram o que já existe; linhas tracejadas, o que está planejado (o app desktop). Não há nenhum serviço
+de nuvem no caminho: o DocGen conversa só com o Ollama no endereço local `127.0.0.1`.
 
-## Usage
+## Roadmap
 
-Create a private output directory once (the writer intentionally does not create path components):
+| Fase | Entrega | Status |
+|---|---|---|
+| 0 | Auditoria do projeto, plano de execução e decisões de arquitetura (ADRs). | ✅ Concluída |
+| 1 | Somente local: só o Ollama, sem provedor remoto, e correção do corte silencioso de prompts longos (`num_ctx` explícito, com falha fechada). | ✅ Concluída |
+| 2 | Launcher desktop sem login: instância única, token de lançamento e dados em diretórios próprios de cada sistema. | 🚧 Em andamento: desenho aprovado, implementação ainda não começou |
+| 3 | Ollama, diagnóstico de hardware, catálogo e recomendação de modelos Qwen. | 🗺️ Planejada |
+| 4 | Chat local com respostas em tempo real. | 🗺️ Planejada |
+| 5 | Anexos PDF e Markdown no chat. | 🗺️ Planejada |
+| 6 | Ferramentas de engenharia integradas ao chat. | 🗺️ Planejada |
+| 7 | Instaladores para Linux, Windows e macOS. | 🗺️ Planejada |
+| 8 | Site oficial. | 🗺️ Planejada |
+| 9 | Documentação final e validação ponta a ponta. | 🗺️ Planejada |
 
-```sh
-mkdir -p ./generated
-chmod 700 ./generated
-```
+Detalhes no [roadmap completo](docs/desktop/ROADMAP.md) e nas decisões de arquitetura:
+[shell desktop](docs/adr/0001-shell-desktop.md),
+[autenticação por token de lançamento](docs/adr/0002-autenticacao-por-token-de-lancamento.md) e
+[somente local](docs/adr/0003-somente-local.md).
 
-Inspect what would be scanned (nothing is sent anywhere):
+Antes do realinhamento, o DocGen teve uma CLI de documentação de repositórios (v1) e um workspace web com API REST
+(v2.0.0, publicada em 2026-10-22). As mudanças de cada versão estão no [CHANGELOG](CHANGELOG.md).
 
-```sh
-java -jar target/docgen.jar --dry-run /path/to/repository
-```
+## Para desenvolvedores: usar hoje
 
-Inspect the exact prompts that a real run would send (written locally, nothing is sent):
+O que existe hoje é usado pelo terminal. Não há release da versão 3.0: a última release publicada (v2.0.0) ainda tem o
+provedor remoto e o comportamento antigo, então compile pelo código-fonte.
 
-```sh
-java -jar target/docgen.jar --preview-prompt --output ./generated /path/to/repository
-```
+### Pré-requisitos
 
-Generate docs with Groq:
+| Requisito | Detalhe |
+|---|---|
+| Java 21 ou mais novo | Para compilar e executar. |
+| Maven 3.9 ou mais novo | Para compilar. |
+| Ollama | Em execução em `127.0.0.1:11434`. Download oficial: [ollama.com/download](https://ollama.com/download). |
+| Modelo `qwen2.5-coder:7b` | Instalado no Ollama com `ollama pull qwen2.5-coder:7b` (cerca de 4,7 GB, segundo a [biblioteca do Ollama](https://ollama.com/library/qwen2.5-coder)). O DocGen nunca baixa modelos sozinho. |
+| Node.js 20 ou mais novo | Só para os testes do frontend. |
 
-```sh
-export GROQ_API_KEY="..."
-java -jar target/docgen.jar --allow-remote --output ./generated /path/to/repository
-```
+### Compilar
 
-The command above asks for y/N confirmation in a real terminal. In CI or another non-interactive environment, add `--yes`; without both `--allow-remote` and `--yes`, no remote request is made.
-
-Generate docs with local Ollama:
-
-```sh
-java -jar target/docgen.jar --provider ollama --model llama3.2 --output ./generated /path/to/repository
-```
-
-Overwrite existing output files:
-
-```sh
-java -jar target/docgen.jar --allow-remote --force /path/to/repository
-```
-
-## Controlling what is scanned
-
-The following controls narrow the scan; none can widen it past the built-in sensitive-file exclusions:
-
-1. **Built-in exclusions** — agent/IDE/build directories, prompt-preview snapshots, `.env*`, `credentials*`, `*secret*`, service-account files, private keys, key stores and other sensitive path components are excluded before any allowlist can apply.
-2. **`.gitignore`** — root and nested files are loaded in scope. Ordered negation, BOMs, `*`, `?`, ASCII bracket ranges and `**` directory segments are supported with Git-compatible UTF-8 byte matching; POSIX/nested or non-ASCII bracket classes and non-NFC patterns fail closed instead of being approximated. Because repository `core.ignoreCase` is not trusted, ordered case-sensitive and ASCII-case-insensitive states are both evaluated and a path excluded by either remains excluded. Ambiguously cased ignore filenames and ambiguous control characters fail closed, while non-NFC/decode-ambiguous pathnames are excluded. A child cannot be re-included while its parent directory remains ignored, and a directory negation cannot cancel a more-specific child exclusion; sensitive-file exclusions still win over negation.
-3. **`.docgenignore`** — a root-only, exclusion-only file. Blank lines and `#` comments are ignored. A pattern without `/` matches at any depth (`notes.md`, `*.sql`); a pattern with `/` is relative to the root (`docs/internal.md`); a trailing `/` excludes a directory and everything under it (`docs/`). Negation (`!`) is rejected rather than silently ignored.
-4. **`--include-ext java,md,xml`** — an optional allowlist that narrows the built-in supported set.
-5. **`--dry-run`** — prints the bounded local selection report and exits without contacting any provider.
-
-The scan is deterministic and bounded to 4,096 discovered entries, 512 attempted files, 64 directory levels, 512 characters per prompt-visible path, 256 KiB read per file, 20,000 prompt characters per file, and 120,000 file-content characters total. Each ignore file is limited to 64 KiB; at most 512 ordered rules, 2,048 deterministic compiled globs, 8,192 segment matchers and 250,000 NFA states (both case modes) are accepted, under a global matching-work budget. File-tree and skipped-file metadata have separate bounded budgets. A limit excess is reported or fails closed; it never causes unbounded matcher allocation, an unbounded prompt, or regex-style glob backtracking.
-
-## What is sent to the provider
-
-When a generation run proceeds, each prompt contains the redacted content of included files, redacted relative paths/file tree, and bounded, redacted metadata for files skipped by content limits. A normal run makes one README request and one architecture request; Groq can make at most three attempts per request after rate-limit or server errors. With Groq this leaves your machine for the fixed `https://api.groq.com` endpoint, authenticated with `GROQ_API_KEY`; with Ollama it goes directly (system proxies are disabled) to the fixed IPv4 loopback endpoint `http://127.0.0.1:11434`. Names of sensitive, ignored, unsupported, or allowlist-filtered files never enter a prompt. Secret redaction is best-effort — review with `--preview-prompt` when in doubt.
-
-Before either prompt is built, a normal run verifies that the output directory and both final targets are eligible for publication. Provider responses are bounded before accumulation, must carry a successful completion marker, are redacted a second time, and are limited to 2,000,000 characters. Ollama's complete NDJSON body is additionally capped at 16 MiB and consumed by the timed HTTP exchange before parsing. Output must start with an H1 and use passive Markdown: no raw HTML, images, autolinks, or non-web link schemes. Only after both documents validate does the writer revalidate the output conditions and start its handle-relative, rollback-aware pair transaction.
-
-## Options
-
-```text
---provider <groq|ollama>   LLM provider. Default: groq
---model <name>             Provider model
---allow-remote             Required for Groq remote API use
---dry-run                  List included/excluded files and exit; contacts no provider
---preview-prompt           Write the exact prompts to the output dir; contacts no provider
---include-ext <exts>       Comma-separated extension allowlist (e.g. java,md,xml)
--y, --yes                  Confirm remote sending in non-interactive runs
--o, --output <dir>         Output directory. Default: current directory
---force                    Overwrite existing documentation or prompt previews
--h, --help                 Show help
--V, --version              Show version
-```
-
-The output directory must already exist and satisfy the secure-filesystem requirements above. `--preview-prompt` writes `docgen-readme.prompt.txt` and `docgen-architecture.prompt.txt` there with owner-only permissions where POSIX attributes are available. Existing previews are preserved unless `--force` is supplied, and preview filenames are always excluded from future scans.
-
-## Installation from release
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/brunocorreia-dev/Docgen/main/install.sh | sh
-```
-
-### Verifying a release manually
-
-Releases are signed keyless via GitHub Actions OIDC (Sigstore), so there is no long-lived public key to distribute: the signing identity is the release workflow itself. Download `docgen.jar` and `docgen.jar.sigstore.json` from the release, then:
-
-```sh
-cosign verify-blob \
-  --bundle docgen.jar.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/brunocorreia-dev/Docgen/\.github/workflows/release\.yml@refs/tags/' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  docgen.jar
-```
-
-A passing verification proves the JAR was signed under this repository's `release.yml` identity for a release tag. Build provenance additionally depends on the reviewed workflow, which signs only the artifacts received from its same-run, read-only build job. The same check works for `docgen.jar.sha256`, the CycloneDX SBOM `docgen.cdx.json`, and its checksum, each with its corresponding `.sigstore.json` bundle.
-
-## Development
-
-```sh
-mvn -B test
+```bash
+git clone https://github.com/brunocorreia-dev/Docgen.git
+cd Docgen
 mvn -B verify
 ```
 
-CI runs tests, generates and retains a CycloneDX SBOM, reviews dependency changes, blocks known vulnerable dependencies with OSV-Scanner, and performs CodeQL analysis with the extended security query suite. Releases are restricted to `brunocorreia-dev/Docgen` and rerun the vulnerability gate. The build and tests execute in a job limited to `contents: read`; a separate job with no checkout or Maven execution receives only the resulting artifacts, signs them keyless through GitHub OIDC, and uploads the JAR, CycloneDX SBOM, and both checksums. Every third-party GitHub Action reference is pinned to a full commit SHA and kept updateable by Dependabot.
+O build roda os testes e gera `target/docgen.jar` (CLI) e `docgen-api/target/docgen-api.jar` (workspace web).
+
+### Usar a CLI
+
+```bash
+mkdir -p ./generated && chmod 700 ./generated
+
+# Mostra quais arquivos seriam lidos, sem chamar a IA
+java -jar target/docgen.jar --dry-run /caminho/do/repositorio
+
+# Grava em ./generated o prompt exato, sem chamar a IA
+java -jar target/docgen.jar --preview-prompt --output ./generated /caminho/do/repositorio
+
+# Gera README.md e ARCHITECTURE.md com o Ollama
+java -jar target/docgen.jar --output ./generated /caminho/do/repositorio
+```
+
+- O diretório de saída precisa existir e não pode ser gravável por outros usuários. Arquivos existentes só são
+  substituídos com `--force`.
+- Para usar outro modelo já instalado, acrescente `--model <nome>`.
+- Se o modelo não estiver instalado, a CLI explica como instalá-lo e encerra sem baixar nada.
+- Se o repositório não couber no contexto do modelo, a geração para antes de qualquer envio e sugere reduzir a seleção
+  com `--include-ext` ou `.docgenignore`.
+
+Todas as opções, as regras de seleção de arquivos e os limites estão em [docs/cli.md](docs/cli.md).
+
+### Subir o workspace web
+
+```bash
+export DOCGEN_API_USERNAME="$USER"
+read -rs -p "Senha (12+ caracteres): " DOCGEN_API_PASSWORD; echo
+export DOCGEN_API_PASSWORD
+./docgen-server
+```
+
+Abra `http://127.0.0.1:8080` e entre com esse usuário e essa senha.
+
+> [!NOTE]
+> O login por usuário e senha é **temporário**. A Fase 2 o substitui por um launcher que abre o app já autenticado
+> ([ADR 0002](docs/adr/0002-autenticacao-por-token-de-lancamento.md)).
+
+Variáveis de ambiente, fluxo de trabalho e a API REST estão em [docs/api.md](docs/api.md).
+
+## Segurança e privacidade
+
+O que já está em `main`:
+
+- O repositório é lido só por `SecureDirectoryStream`, sem seguir links simbólicos e com limites de tamanho.
+- Arquivos sensíveis (`.env*`, chaves privadas, credenciais) nunca são lidos, e `.gitignore` e `.docgenignore` são
+  respeitados.
+- O `SecretRedactor` remove tokens e credenciais conhecidos do prompt e da resposta.
+- Conteúdo de repositórios e de PDFs entra no prompt como dado não confiável, entre delimitadores, com as regras
+  reafirmadas depois do bloco.
+- A resposta só é gravada se for Markdown passivo (sem HTML, imagens ou scripts), e o par README e ARCHITECTURE é
+  gravado de forma transacional.
+- O Ollama é acessado só em `127.0.0.1`, sem resolução de nome, sem proxy e sem seguir redirecionamentos. Não existe
+  provedor remoto nem chave de API.
+- O contexto do modelo é dimensionado para cada pedido. Se o prompt não couber, a operação falha em vez de ser cortada
+  em silêncio.
+- Um teste de arquitetura reprova o build se surgir no código uma URL remota, outro cliente de rede ou outro provedor.
+- O workspace escuta só em `127.0.0.1`, confere o cabeçalho `Host`, não libera CORS e usa uma política de segurança de
+  conteúdo (CSP) estrita.
+
+Limitações conhecidas:
+
+- **Modelos de nuvem do Ollama ainda não são bloqueados.** O bloqueio vem na Fase 3. Até lá, use modelos locais ou
+  ative o modo só local do Ollama (`OLLAMA_NO_CLOUD=1`, conforme a [FAQ do Ollama](https://docs.ollama.com/faq)).
+- A estimativa de contexto é calibrada para a família Qwen. Para outras famílias de modelo, é melhor esforço.
+- A redação de segredos funciona por padrões e não reconhece todos os formatos.
+- As defesas contra *prompt injection* reduzem o risco, mas não o eliminam.
+- A IA produz rascunhos: revise a documentação antes de publicar.
+- O workspace ainda usa login por usuário e senha e não tem HTTPS (o tráfego fica no endereço local).
+
+Os detalhes estão em [SECURITY.md](SECURITY.md). Para relatar uma vulnerabilidade, abra um security advisory privado
+no GitHub antes de qualquer divulgação.
+
+## Arquitetura do repositório
+
+| Caminho | Conteúdo |
+|---|---|
+| `docgen-core` | Núcleo reutilizável: varredura segura, prompts, cliente do Ollama, validação e planejamento de arquitetura. |
+| `docgen-cli` | Linha de comando (`target/docgen.jar`). |
+| `docgen-api` | Backend Spring Boot em loopback, com dados locais (H2 e Flyway); serve o workspace. |
+| `docgen-web` | Interface web sem framework e sem build (HTML, CSS e ES Modules). |
+| `site/` | Página estática provisória publicada na Vercel. |
+| `docs/` | Roadmap, decisões de arquitetura e referências da [CLI](docs/cli.md), da [API](docs/api.md) e do [desenvolvimento](docs/development.md). |
+
+A descrição de cada componente está em [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Contribuindo
+
+```bash
+mvn -B verify                                   # testes Java e SBOMs
+node --test docgen-web/src/test/js/*.test.mjs   # testes do frontend
+```
+
+A verificação bem-sucedida comprova que o JAR foi assinado pela identidade `release.yml` deste repositório em uma tag de release. A proveniência do build depende também do workflow revisado, que assina apenas os artefatos recebidos do job de build somente leitura da mesma execução. O mesmo comando funciona para `docgen.jar.sha256`, `docgen.cdx.json` e o respectivo checksum, cada um com seu bundle `.sigstore.json`.
+
+> [!NOTE]
+> Sem o cosign, o checksum detecta corrupção, mas não a substituição maliciosa conjunta do artefato e do checksum. As assinaturas não protegem contra o comprometimento do repositório ou da definição do workflow.
+
+## Limitações conhecidas
+
+**Confirmadas na implementação e em [SECURITY.md](SECURITY.md):**
+
+- **Dependência de LLMs**: a qualidade da documentação depende do modelo escolhido. O texto gerado pode conter erros ou afirmações imprecisas, e a validação verifica apenas a forma.
+- **Revisão humana obrigatória**: nenhum controle automatizado comprova a veracidade do conteúdo gerado.
+- **Leitura limitada**: repositórios grandes são analisados apenas parcialmente, conforme os [limites da varredura](#limites-da-varredura). Arquivos acima dos limites são ignorados, e apenas seus nomes e motivos são informados ao modelo.
+- **Sistema de arquivos**: é necessário suporte a `SecureDirectoryStream`. Hardlinks e bind mounts não são distinguíveis.
+- **Diretório de saída**: precisa existir previamente e, em POSIX, não pode ter permissão de escrita para grupo ou outros usuários.
+- **Redação best-effort**: formatos de segredo não reconhecidos podem passar despercebidos.
+- **`.docgenignore` sem negação.**
+- **DocGen Web é local**: sessões e o controle de tentativas ficam em memória (reiniciar o servidor encerra as sessões). Não há HTTPS nem suporte a exposição em rede, e o modelo multiusuário é para uso local.
+- **PDFs**: sem OCR (digitalizados são rejeitados), sem PDFs protegidos por senha, até 10 MB, 200 páginas e 200.000 caracteres extraídos por arquivo e 5 anexos por projeto.
+- **Planos da IA**: o parser garante estrutura e limites, não a qualidade das recomendações. Modelos pequenos podem gerar planos rasos ou inconsistentes; a aprovação humana é obrigatória antes da documentação.
+- **Release**: apenas a CLI (`docgen.jar`) é publicada e assinada; o JAR da API é gerado localmente.
+- **DocGen Desktop**: somente o Linux foi verificado (Windows e macOS ainda não são suportados); o pacote é gerado localmente e ainda não é publicado nem assinado; o pareamento depende de a pessoa conferir o código antes de autorizar. Veja [SECURITY.md](SECURITY.md#modo-desktop-docgen-launcher).
+- **Local x remoto**: com Groq, o conteúdo redigido sai da máquina com destino a `api.groq.com`. Com Ollama, permanece no loopback local, mas exige o serviço e o modelo instalados localmente. Os timeouts de requisição são de 5 minutos no Groq e 10 minutos no Ollama.
+
+## Evolução do projeto
+
+Histórico recente:
+
+1. **Fase 01**: extração do `DocumentationService` reutilizável.
+2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
+3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
+4. **DocGen Desktop**: launcher nativo, verificação de identidade do backend, pareamento sem senha e pacote Linux com runtime próprio.
+
+Testes, CI e o processo de release estão descritos em [docs/development.md](docs/development.md). Sugestões e
+problemas podem ser enviados pelas [issues](https://github.com/brunocorreia-dev/Docgen/issues).
+
+## Licença
+
+O repositório ainda não tem um arquivo `LICENSE`, então nenhuma licença de código aberto foi concedida até agora.
+Definir a licença é uma pendência registrada.
+
+## Autor
+
+Desenvolvido por **Bruno Correia**: [github.com/brunocorreia-dev](https://github.com/brunocorreia-dev).

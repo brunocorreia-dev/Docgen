@@ -6,92 +6,118 @@
 
     <groupId>com.docgen</groupId>
     <artifactId>docgen</artifactId>
-    <version>1.0.0</version>
+    <version>3.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
     <name>DocGen</name>
-    <description>CLI tool that generates README and architecture documentation from a repository.</description>
+    <description>Secure documentation and architecture-planning engine, CLI, loopback REST API, web workspace and desktop launcher.</description>
+
+    <modules>
+        <module>docgen-core</module>
+        <module>docgen-cli</module>
+        <module>docgen-web</module>
+        <module>docgen-desktop-protocol</module>
+        <module>docgen-api</module>
+        <!-- Declared after docgen-api so a full reactor build packages the API jar first. -->
+        <module>docgen-launcher</module>
+    </modules>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-boot.version>4.1.1</spring-boot.version>
         <picocli.version>4.7.7</picocli.version>
-        <jackson.version>2.21.5</jackson.version>
-        <junit.version>6.1.3</junit.version>
+        <jackson.version>2.21.8</jackson.version>
+        <junit.version>6.1.0</junit.version>
+        <maven.compiler.version>3.15.0</maven.compiler.version>
+        <maven.surefire.version>3.5.5</maven.surefire.version>
+        <maven.shade.version>3.6.2</maven.shade.version>
+        <maven.jar.version>3.5.0</maven.jar.version>
+        <cyclonedx.version>2.9.2</cyclonedx.version>
+        <pdfbox.version>3.0.8</pdfbox.version>
+        <!-- MIT. Hardware diagnosis of the desktop app only, so the CLI SBOM does not change. -->
+        <oshi.version>7.7.1</oshi.version>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>info.picocli</groupId>
-            <artifactId>picocli</artifactId>
-            <version>${picocli.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven.compiler.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven.surefire.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>${maven.shade.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>${maven.jar.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                </plugin>
+                <plugin>
+                    <!-- Each distributed artifact gets its own SBOM so the CLI SBOM
+                         never lists server-only dependencies such as Spring Boot. -->
+                    <groupId>org.cyclonedx</groupId>
+                    <artifactId>cyclonedx-maven-plugin</artifactId>
+                    <version>${cyclonedx.version}</version>
+                    <executions>
+                        <execution>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>makeBom</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <projectType>application</projectType>
+                        <schemaVersion>1.6</schemaVersion>
+                        <includeTestScope>false</includeTestScope>
+                        <outputFormat>json</outputFormat>
+                        <outputDirectory>${maven.multiModuleProjectDirectory}/target</outputDirectory>
+                        <skipAttach>true</skipAttach>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.5</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.2</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <finalName>docgen</finalName>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.docgen.DocGenCLI</mainClass>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.cyclonedx</groupId>
-                <artifactId>cyclonedx-maven-plugin</artifactId>
-                <version>2.9.2</version>
-                <executions>
-                    <execution>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>makeAggregateBom</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <projectType>application</projectType>
-                    <schemaVersion>1.6</schemaVersion>
-                    <includeTestScope>false</includeTestScope>
-                    <outputFormat>json</outputFormat>
-                    <outputName>docgen.cdx</outputName>
-                    <skipAttach>true</skipAttach>
-                </configuration>
             </plugin>
         </plugins>
     </build>

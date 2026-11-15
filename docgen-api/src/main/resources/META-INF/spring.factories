@@ -1,0 +1,3 @@
+# Desktop mode: replaces the password with an in-memory random value (password logins disabled).
+org.springframework.boot.EnvironmentPostProcessor=\
+com.docgen.api.DesktopEnvironmentPostProcessor
