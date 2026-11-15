@@ -80,6 +80,11 @@ final class ApiExceptionHandler {
         return error(HttpStatus.CONFLICT, conflict.code(), conflict.publicMessage());
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    ResponseEntity<ApiDtos.ErrorResponse> forbidden(ForbiddenException failure) {
+        return error(HttpStatus.FORBIDDEN, failure.code(), failure.publicMessage());
+    }
+
     @ExceptionHandler(UnprocessableContentException.class)
     ResponseEntity<ApiDtos.ErrorResponse> unprocessable(UnprocessableContentException failure) {
         return error(HttpStatus.UNPROCESSABLE_CONTENT, failure.code(), failure.publicMessage());

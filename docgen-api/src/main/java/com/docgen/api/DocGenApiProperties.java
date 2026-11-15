@@ -34,13 +34,36 @@ public record DocGenApiProperties(
         ollama = Objects.requireNonNullElseGet(ollama, () -> new Ollama(0));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
-        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null));
-        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(null));
+        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
+        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(false, null, null, null));
     }
 
-    /** Compatibility constructor used by tests that only need repositories. */
-    DocGenApiProperties(Map<String, String> repositories) {
-        this(repositories, null, null, null, null, null, null);
+    /** Compatibility constructor used by tests that only need credentials and repositories. */
+    DocGenApiProperties(Api api, Map<String, String> repositories) {
+        this(api, repositories, null, null, null, null, null, null);
+    }
+
+    public record Api(
+            @NotBlank
+            @Pattern(regexp = "[A-Za-z0-9._-]{1,64}")
+            String username,
+            @NotBlank
+            @Size(min = 12, max = 256)
+            String password,
+            Map<String, String> additionalUsers,
+            List<String> allowedHosts
+    ) {
+        @ConstructorBinding
+        public Api {
+            additionalUsers = additionalUsers == null ? Map.of() : Map.copyOf(additionalUsers);
+            allowedHosts = allowedHosts == null || allowedHosts.isEmpty()
+                    ? List.of("localhost", "127.0.0.1", "::1", "[::1]")
+                    : List.copyOf(allowedHosts);
+        }
+
+        Api(String username, String password) {
+            this(username, password, null, null);
+        }
     }
 
     /**
@@ -92,11 +115,22 @@ public record DocGenApiProperties(
     }
 
     /**
-     * Sessions live only in memory and end with the app (ADR 0002).
+     * Desktop mode, enabled only by the DocGen launcher, which also hands the
+     * per-launch session secret to the process on stdin (see {@link DesktopLauncherLink}).
      *
-     * @param idleTimeout a session unused for this long ends; the UI heartbeat counts as use
+     * @param bootstrapTimeout how long to wait for the launcher's session line before failing
+     * @param armWindow        how long after "Abrir DocGen" one browser may request a pairing
+     * @param pairingTtl       how long a pairing request waits for the user's confirmation
      */
-    public record Auth(Duration idleTimeout) {
+    public record Desktop(boolean enabled, Duration bootstrapTimeout, Duration armWindow, Duration pairingTtl) {
+        public Desktop {
+            bootstrapTimeout = bootstrapTimeout == null ? Duration.ofSeconds(30) : bootstrapTimeout;
+            armWindow = armWindow == null ? Duration.ofMinutes(2) : armWindow;
+            pairingTtl = pairingTtl == null ? Duration.ofMinutes(2) : pairingTtl;
+        }
+    }
+
+    public record Auth(Duration tokenTtl, Duration idleTimeout, Duration consentTtl) {
         public Auth {
             idleTimeout = idleTimeout == null ? Duration.ofHours(12) : idleTimeout;
         }
