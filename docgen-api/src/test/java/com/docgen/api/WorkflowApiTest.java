@@ -194,6 +194,32 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
+    void ollamaThatIsNotRunningIsReportedAsUnavailable() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> {
+            throw new com.docgen.OllamaUnavailableException();
+        });
+
+        JsonNode job = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("provider_unavailable", job.path("error").path("code").asString());
+    }
+
+    @Test
+    void aModelThatRunsOutsideTheComputerIsRefusedWithItsOwnCode() throws Exception {
+        String token = token();
+        String project = createProject(token, "ollama");
+        FakeLlm.enqueue(prompt -> {
+            throw new com.docgen.RemoteModelRefusedException("gpt-oss:120b-cloud");
+        });
+
+        JsonNode job = awaitJob(token, startPlan(token, project, "{}", 202).path("id").asString());
+
+        assertEquals("remote_model_refused", job.path("error").path("code").asString());
+    }
+
+    @Test
     void modelAndContextFailuresHaveTheirOwnStableCodes() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");
@@ -261,7 +287,7 @@ class WorkflowApiTest extends ApiTestSupport {
     }
 
     @Test
-    void limitsActiveJobsPerUserAndHidesJobsFromOtherUsers() throws Exception {
+    void limitsActiveJobsAndHidesJobsOfAnotherOwner() throws Exception {
         String token = token();
         String project = createProject(token, "ollama");
         CountDownLatch started = new CountDownLatch(2);
@@ -276,10 +302,11 @@ class WorkflowApiTest extends ApiTestSupport {
                     .andExpect(status().isTooManyRequests())
                     .andExpect(jsonPath("$.code").value("too_many_jobs"));
 
-            String intruder = token(OTHER, OTHER_PASSWORD);
-            mvc.perform(authed(get("/api/v1/jobs/" + first), intruder)).andExpect(status().isNotFound());
-            mvc.perform(authed(post("/api/v1/jobs/" + first + "/cancellation"), intruder)
+            String foreignJob = foreignJob(foreignProject());
+            mvc.perform(authed(get("/api/v1/jobs/" + foreignJob), token)).andExpect(status().isNotFound());
+            mvc.perform(authed(post("/api/v1/jobs/" + foreignJob + "/cancellation"), token)
                     .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
+            mvc.perform(authed(get("/api/v1/jobs/" + first), token)).andExpect(status().isOk());
         } finally {
             release.countDown();
         }

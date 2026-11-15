@@ -80,6 +80,11 @@ final class ApiExceptionHandler {
         return error(HttpStatus.CONFLICT, conflict.code(), conflict.publicMessage());
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    ResponseEntity<ApiDtos.ErrorResponse> forbidden(ForbiddenException failure) {
+        return error(HttpStatus.FORBIDDEN, failure.code(), failure.publicMessage());
+    }
+
     @ExceptionHandler(UnprocessableContentException.class)
     ResponseEntity<ApiDtos.ErrorResponse> unprocessable(UnprocessableContentException failure) {
         return error(HttpStatus.UNPROCESSABLE_CONTENT, failure.code(), failure.publicMessage());
@@ -88,6 +93,11 @@ final class ApiExceptionHandler {
     @ExceptionHandler(CapacityExceededException.class)
     ResponseEntity<ApiDtos.ErrorResponse> capacityExceeded(CapacityExceededException failure) {
         return error(HttpStatus.TOO_MANY_REQUESTS, failure.code(), failure.publicMessage());
+    }
+
+    @ExceptionHandler(StatusException.class)
+    ResponseEntity<ApiDtos.ErrorResponse> status(StatusException failure) {
+        return error(failure.status(), failure.code(), failure.publicMessage());
     }
 
     @ExceptionHandler(PayloadTooLargeException.class)

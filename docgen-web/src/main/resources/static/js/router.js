@@ -12,6 +12,8 @@ const ROUTES = [
   { name: 'documents', pattern: /^\/documents$/ },
   { name: 'settings', pattern: /^\/settings$/ },
   { name: 'login', pattern: /^\/login$/ },
+  // Opened by the desktop launcher; it carries no credential, only the route.
+  { name: 'desktop', pattern: /^\/desktop$/ },
 ];
 
 export function parseRoute(hash) {
@@ -40,6 +42,7 @@ export function href(name, params = {}) {
     case 'documents': return '#/documents';
     case 'settings': return '#/settings';
     case 'login': return '#/login';
+    case 'desktop': return '#/desktop';
     default: return '#/dashboard';
   }
 }

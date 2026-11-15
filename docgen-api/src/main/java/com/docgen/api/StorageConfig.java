@@ -7,16 +7,12 @@ import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
 import java.io.IOException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.util.Comparator;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -24,11 +20,14 @@ import java.util.stream.Stream;
  * Local persistence: an embedded H2 database inside a private data directory
  * (mode 0700 on POSIX systems) plus a private staging directory for uploads.
  * H2 runs in-process only; no TCP server or web console is started.
+ *
+ * <p>The data directory is resolved per operating system by the desktop
+ * launcher ({@code com.docgen.desktop.AppDirectories}), which also holds the
+ * single-instance lock there, and passed in as
+ * {@code docgen.storage.data-directory}.</p>
  */
 @Configuration(proxyBeanMethods = false)
 class StorageConfig {
-    private static final Set<PosixFilePermission> OWNER_ONLY = PosixFilePermissions.fromString("rwx------");
-
     record StoragePaths(Path dataDirectory, Path staging, boolean temporary) {
     }
 
@@ -43,15 +42,16 @@ class StorageConfig {
         Path data;
         boolean temporary = storage.inMemory();
         if (temporary) {
-            data = posix()
-                    ? Files.createTempDirectory("docgen-", PosixFilePermissions.asFileAttribute(OWNER_ONLY))
+            data = PrivateFiles.posix()
+                    ? Files.createTempDirectory("docgen-",
+                            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
                     : Files.createTempDirectory("docgen-");
         } else {
-            data = resolveDataDirectory(storage.dataDirectory());
-            createPrivateDirectory(data);
+            data = configuredDataDirectory(storage.dataDirectory());
+            PrivateFiles.createDirectory(data);
         }
         Path staging = data.resolve("staging");
-        createPrivateDirectory(staging);
+        PrivateFiles.createDirectory(staging);
         clearStaleStagingFiles(staging);
         StoragePaths paths = new StoragePaths(data, staging, temporary);
         if (temporary) {
@@ -66,12 +66,7 @@ class StorageConfig {
         if (paths.temporary()) {
             config.setJdbcUrl("jdbc:h2:mem:docgen-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");
         } else {
-            Path database = paths.dataDirectory().resolve("docgen");
-            String location = database.toString();
-            if (location.indexOf(';') >= 0 || location.indexOf('?') >= 0) {
-                throw new IllegalStateException("The data directory path contains characters H2 cannot accept");
-            }
-            config.setJdbcUrl("jdbc:h2:file:" + location + ";DB_CLOSE_ON_EXIT=FALSE");
+            config.setJdbcUrl(LocalDatabase.jdbcUrl(paths.dataDirectory()));
         }
         config.setUsername("docgen");
         config.setPassword("");
@@ -80,42 +75,18 @@ class StorageConfig {
         return new HikariDataSource(config);
     }
 
-    static Path resolveDataDirectory(String configured) {
-        Path path;
-        if (configured != null && !configured.isBlank()) {
-            path = Path.of(configured);
-        } else {
-            String xdg = System.getenv("XDG_DATA_HOME");
-            Path base = xdg != null && !xdg.isBlank() && Path.of(xdg).isAbsolute()
-                    ? Path.of(xdg)
-                    : Path.of(System.getProperty("user.home"), ".local", "share");
-            path = base.resolve("docgen");
+    static Path configuredDataDirectory(String configured) {
+        if (configured == null || configured.isBlank()) {
+            throw new IllegalStateException("No data directory is configured; start DocGen through its launcher");
         }
+        Path path = Path.of(configured);
         if (!path.isAbsolute() || !path.equals(path.normalize())) {
             throw new IllegalStateException("The data directory must be an absolute, normalized path");
         }
         return path;
     }
 
-    static void createPrivateDirectory(Path directory) throws IOException {
-        if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
-            if (posix()) {
-                Files.createDirectories(directory, PosixFilePermissions.asFileAttribute(OWNER_ONLY));
-            } else {
-                Files.createDirectories(directory);
-            }
-        }
-        BasicFileAttributes attributes = Files.readAttributes(
-                directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
-            throw new IllegalStateException("Storage paths must be real directories, not symbolic links");
-        }
-        if (posix()) {
-            Files.setPosixFilePermissions(directory, OWNER_ONLY);
-        }
-    }
-
-    private static void clearStaleStagingFiles(Path staging) throws IOException {
+    static void clearStaleStagingFiles(Path staging) throws IOException {
         try (Stream<Path> entries = Files.list(staging)) {
             for (Path entry : entries.toList()) {
                 if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
@@ -137,9 +108,5 @@ class StorageConfig {
         } catch (IOException ignored) {
             // Best effort on shutdown.
         }
-    }
-
-    private static boolean posix() {
-        return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     }
 }

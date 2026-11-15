@@ -2,21 +2,76 @@
 
 # DocGen
 
-**Seu assistente local e gratuito.**
-
-Sua IA. Seu computador. Suas regras.
+**Plataforma em Java 21 para documentação e planejamento de arquitetura de software assistidos por IA, com segurança como padrão: CLI, API REST, workspace web e aplicativo desktop local.**
 
 [![CI](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml/badge.svg)](https://github.com/brunocorreia-dev/Docgen/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
-![Status](https://img.shields.io/badge/status-em%20desenvolvimento-orange)
+![Maven](https://img.shields.io/badge/Maven-3.9%2B-C71A36?logo=apachemaven&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![Frontend](https://img.shields.io/badge/frontend-HTML%20%7C%20CSS%20%7C%20ES%20Modules-7C3AED)
+![LLM](https://img.shields.io/badge/LLM-Ollama%20local-4B5563)
+![SBOM](https://img.shields.io/badge/SBOM-CycloneDX%201.6-0B5FFF)
+![Assinatura](https://img.shields.io/badge/assinatura-Sigstore-2E2E2E)
+
+[Visão geral](#visão-geral) ·
+[Funcionalidades](#principais-funcionalidades) ·
+[Instalação](#instalação) ·
+[Uso](#guia-de-utilização) ·
+[DocGen Web](#docgen-web) ·
+[Desktop](#docgen-desktop) ·
+[API REST](#api-rest) ·
+[CLI](#referência-completa-da-cli) ·
+[Segurança](#segurança) ·
+[Arquitetura](#arquitetura-do-projeto) ·
+[Qualidade](#testes-e-qualidade)
 
 </div>
 
-> [!WARNING]
-> **O DocGen está sendo reconstruído para virar um aplicativo desktop, e esse app ainda não está pronto para uso.**
-> O que funciona hoje é voltado a desenvolvedores: uma linha de comando que gera documentação de repositórios e um
-> workspace web local, os dois usando uma IA que roda no seu computador. Ainda não há instalador do app nem versão 3.0
-> publicada. Acompanhe o andamento no [roadmap](docs/desktop/ROADMAP.md).
+> [!NOTE]
+> **Em desenvolvimento (3.0.0-SNAPSHOT):** o DocGen está sendo realinhado como um aplicativo desktop de IA local e gratuito, com modelos Qwen via Ollama. Desde esta versão, **todo o processamento é local**: não existe mais provedor remoto. O launcher e a configuração de modelos estão implementados; o chat e os instaladores seguem planejados.
+
+| Entrega | Status nesta branch |
+|---|---|
+| Fase 1 · somente Ollama local | ✅ Implementado |
+| Fase 2 · launcher desktop sem login | ✅ Implementado |
+| Fase 3 · onboarding, catálogo e Modelos | ✅ Implementado; aguarda integração em `main` |
+| Fase 4 · chat local | 🗺️ Planejado |
+| Fase 5 · anexos no chat | 🗺️ Planejado |
+| Fase 6 · Engenharia integrada ao chat | 🗺️ Planejado |
+| Fase 7 · instaladores | 🗺️ Planejado |
+
+---
+
+## Sumário
+
+- [Visão geral](#visão-geral)
+- [Principais funcionalidades](#principais-funcionalidades)
+- [Tecnologias utilizadas](#tecnologias-utilizadas)
+- [Como o DocGen funciona](#como-o-docgen-funciona)
+- [Pré-requisitos](#pré-requisitos)
+- [Instalação](#instalação)
+- [Guia de utilização](#guia-de-utilização)
+- [Referência completa da CLI](#referência-completa-da-cli)
+- [DocGen Web](#docgen-web)
+- [DocGen Desktop](#docgen-desktop)
+- [API REST](#api-rest)
+- [Segurança](#segurança)
+- [Configuração da análise](#configuração-da-análise)
+- [Arquitetura do projeto](#arquitetura-do-projeto)
+- [Testes e qualidade](#testes-e-qualidade)
+- [Distribuição e integridade](#distribuição-e-integridade)
+- [Limitações conhecidas](#limitações-conhecidas)
+- [Evolução do projeto](#evolução-do-projeto)
+- [Autor](#autor)
+
+## Visão geral
+
+O **DocGen** nasceu como uma aplicação de linha de comando que lê um repositório local, seleciona os arquivos de texto relevantes e usa um modelo de linguagem (LLM) para redigir dois documentos:
+
+| Documento | Conteúdo |
+|---|---|
+| `README.md` | Documentação geral do projeto. |
+| `ARCHITECTURE.md` | Documentação da arquitetura de software. |
 
 ## O que é o DocGen
 
@@ -238,11 +293,37 @@ mvn -B verify                                   # testes Java e SBOMs
 node --test docgen-web/src/test/js/*.test.mjs   # testes do frontend
 ```
 
-- Crie uma branch a partir de `main` e abra um pull request.
-- O PR só entra com a CI verde (testes com Temurin 21, CodeQL, OSV-Scanner e revisão de dependências) e por merge
-  commit.
-- As mensagens de commit seguem o padrão Conventional Commits, em
-  português (por exemplo, `fix(cli): valida o tamanho dos prompts antes de anunciar a geração`).
+A verificação bem-sucedida comprova que o JAR foi assinado pela identidade `release.yml` deste repositório em uma tag de release. A proveniência do build depende também do workflow revisado, que assina apenas os artefatos recebidos do job de build somente leitura da mesma execução. O mesmo comando funciona para `docgen.jar.sha256`, `docgen.cdx.json` e o respectivo checksum, cada um com seu bundle `.sigstore.json`.
+
+> [!NOTE]
+> Sem o cosign, o checksum detecta corrupção, mas não a substituição maliciosa conjunta do artefato e do checksum. As assinaturas não protegem contra o comprometimento do repositório ou da definição do workflow.
+
+## Limitações conhecidas
+
+**Confirmadas na implementação e em [SECURITY.md](SECURITY.md):**
+
+- **Dependência de LLMs**: a qualidade da documentação depende do modelo escolhido. O texto gerado pode conter erros ou afirmações imprecisas, e a validação verifica apenas a forma.
+- **Revisão humana obrigatória**: nenhum controle automatizado comprova a veracidade do conteúdo gerado.
+- **Leitura limitada**: repositórios grandes são analisados apenas parcialmente, conforme os [limites da varredura](#limites-da-varredura). Arquivos acima dos limites são ignorados, e apenas seus nomes e motivos são informados ao modelo.
+- **Sistema de arquivos**: é necessário suporte a `SecureDirectoryStream`. Hardlinks e bind mounts não são distinguíveis.
+- **Diretório de saída**: precisa existir previamente e, em POSIX, não pode ter permissão de escrita para grupo ou outros usuários.
+- **Redação best-effort**: formatos de segredo não reconhecidos podem passar despercebidos.
+- **`.docgenignore` sem negação.**
+- **DocGen Web é local**: sessões e o controle de tentativas ficam em memória (reiniciar o servidor encerra as sessões). Não há HTTPS nem suporte a exposição em rede, e o modelo multiusuário é para uso local.
+- **PDFs**: sem OCR (digitalizados são rejeitados), sem PDFs protegidos por senha, até 10 MB, 200 páginas e 200.000 caracteres extraídos por arquivo e 5 anexos por projeto.
+- **Planos da IA**: o parser garante estrutura e limites, não a qualidade das recomendações. Modelos pequenos podem gerar planos rasos ou inconsistentes; a aprovação humana é obrigatória antes da documentação.
+- **Release**: apenas a CLI (`docgen.jar`) é publicada e assinada; o JAR da API é gerado localmente.
+- **DocGen Desktop**: somente o Linux foi verificado (Windows e macOS ainda não são suportados); o pacote é gerado localmente e ainda não é publicado nem assinado; o pareamento depende de a pessoa conferir o código antes de autorizar. Veja [SECURITY.md](SECURITY.md#modo-desktop-docgen-launcher).
+- **Local x remoto**: com Groq, o conteúdo redigido sai da máquina com destino a `api.groq.com`. Com Ollama, permanece no loopback local, mas exige o serviço e o modelo instalados localmente. Os timeouts de requisição são de 5 minutos no Groq e 10 minutos no Ollama.
+
+## Evolução do projeto
+
+Histórico recente:
+
+1. **Fase 01**: extração do `DocumentationService` reutilizável.
+2. **Fase 02**: Maven reactor (`docgen-core`, `docgen-cli`, `docgen-api`) e primeira API REST.
+3. **DocGen Web**: workspace web, projetos, PDFs, planejamento arquitetural estruturado, diagramas, jobs, documentação revisável e persistência local.
+4. **DocGen Desktop**: launcher nativo, verificação de identidade do backend, pareamento sem senha e pacote Linux com runtime próprio.
 
 Testes, CI e o processo de release estão descritos em [docs/development.md](docs/development.md). Sugestões e
 problemas podem ser enviados pelas [issues](https://github.com/brunocorreia-dev/Docgen/issues).

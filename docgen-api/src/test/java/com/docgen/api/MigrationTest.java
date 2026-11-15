@@ -48,6 +48,28 @@ class MigrationTest {
                 "plans keep the provider that actually produced them");
     }
 
+    @Test
+    void v3MovesEveryRowToTheFixedLocalOwnerAndKeepsTheOwnerColumn() {
+        SimpleDriverDataSource dataSource = new SimpleDriverDataSource(new Driver(),
+                "jdbc:h2:mem:migration-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "docgen", "");
+        migrateTo(dataSource, "2");
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        insertProject(jdbc, "11111111-1111-1111-1111-111111111111", "ollama", null);
+        jdbc.sql("UPDATE projects SET owner = 'ana'").update();
+        jdbc.sql("""
+                        INSERT INTO jobs (id, owner, project_id, type, status, provider, model, created_at, updated_at)
+                        VALUES ('44444444-4444-4444-4444-444444444444', 'bruno',
+                                '11111111-1111-1111-1111-111111111111', 'ARCHITECTURE_PLAN', 'SUCCEEDED', 'ollama',
+                                NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """)
+                .update();
+
+        migrateTo(dataSource, "3");
+
+        assertEquals(List.of("local"), jdbc.sql("SELECT owner FROM projects").query(String.class).list());
+        assertEquals(List.of("local"), jdbc.sql("SELECT owner FROM jobs").query(String.class).list());
+    }
+
     private static void migrateTo(SimpleDriverDataSource dataSource, String version) {
         Flyway.configure()
                 .dataSource(dataSource)

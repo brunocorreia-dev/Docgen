@@ -4,15 +4,11 @@ import com.docgen.OllamaEndpoint;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -23,13 +19,13 @@ import java.util.Objects;
 @Validated
 @ConfigurationProperties(prefix = "docgen")
 public record DocGenApiProperties(
-        @Valid Api api,
         Map<String, String> repositories,
         @Valid Storage storage,
         @Valid Ollama ollama,
         @Valid Jobs jobs,
         @Valid Attachments attachments,
-        @Valid Auth auth
+        @Valid Auth auth,
+        @Valid Desktop desktop
 ) {
     @ConstructorBinding
     public DocGenApiProperties {
@@ -38,12 +34,13 @@ public record DocGenApiProperties(
         ollama = Objects.requireNonNullElseGet(ollama, () -> new Ollama(0));
         jobs = Objects.requireNonNullElseGet(jobs, () -> new Jobs(0, 0, 0, null));
         attachments = Objects.requireNonNullElseGet(attachments, () -> new Attachments(0, 0, 0, 0, null));
-        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null));
+        auth = Objects.requireNonNullElseGet(auth, () -> new Auth(null, null, null));
+        desktop = Objects.requireNonNullElseGet(desktop, () -> new Desktop(false, null, null, null));
     }
 
     /** Compatibility constructor used by tests that only need credentials and repositories. */
     DocGenApiProperties(Api api, Map<String, String> repositories) {
-        this(api, repositories, null, null, null, null, null);
+        this(api, repositories, null, null, null, null, null, null);
     }
 
     public record Api(
@@ -117,10 +114,37 @@ public record DocGenApiProperties(
         }
     }
 
-    public record Auth(Duration tokenTtl, Duration idleTimeout) {
+    /**
+     * Desktop mode, enabled only by the DocGen launcher, which also hands the
+     * per-launch session secret to the process on stdin (see {@link DesktopLauncherLink}).
+     *
+     * @param bootstrapTimeout how long to wait for the launcher's session line before failing
+     * @param armWindow        how long after "Abrir DocGen" one browser may request a pairing
+     * @param pairingTtl       how long a pairing request waits for the user's confirmation
+     */
+    public record Desktop(boolean enabled, Duration bootstrapTimeout, Duration armWindow, Duration pairingTtl) {
+        public Desktop {
+            bootstrapTimeout = bootstrapTimeout == null ? Duration.ofSeconds(30) : bootstrapTimeout;
+            armWindow = armWindow == null ? Duration.ofMinutes(2) : armWindow;
+            pairingTtl = pairingTtl == null ? Duration.ofMinutes(2) : pairingTtl;
+        }
+    }
+
+    public record Auth(Duration tokenTtl, Duration idleTimeout, Duration consentTtl) {
         public Auth {
-            tokenTtl = tokenTtl == null ? Duration.ofHours(8) : tokenTtl;
-            idleTimeout = idleTimeout == null ? Duration.ofMinutes(30) : idleTimeout;
+            idleTimeout = idleTimeout == null ? Duration.ofHours(12) : idleTimeout;
+        }
+    }
+
+    /**
+     * Desktop app lifecycle (ADR 0001).
+     *
+     * @param idleTimeout the app exits when the UI sent no heartbeat for this long and no
+     *                    model download or generation is running
+     */
+    public record Desktop(Duration idleTimeout) {
+        public Desktop {
+            idleTimeout = idleTimeout == null ? Duration.ofMinutes(10) : idleTimeout;
         }
     }
 }

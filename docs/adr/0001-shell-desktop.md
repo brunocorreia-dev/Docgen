@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Estado | **Aceita** (decisão 4.1 do pedido de realinhamento; os pontos que estavam pendentes foram decididos na aprovação da Fase 0) |
+| Estado | **Aceita e implementada** na Fase 2 (decisão 4.1 do pedido de realinhamento; os pontos que estavam pendentes foram decididos na aprovação da Fase 0; ajustes da implementação na seção final) |
 | Data | 2026-10-24 |
 | Fase | Proposta na Fase 0; implementação na Fase 2 |
 | Relacionadas | [ADR 0002](0002-autenticacao-por-token-de-lancamento.md), [ADR 0003](0003-somente-local.md), [roadmap](../desktop/ROADMAP.md) |
@@ -94,3 +94,27 @@ uma janela Swing além do navegador e um pareamento manual a cada abertura.
   relógio controlado).
 - Testes automatizados para trava, reabertura com segredo errado (recusada), escolha de porta e fallback de
   abertura do navegador (com abridor falso).
+
+## Implementação (Fase 2, 2026-10-24)
+
+Estado: **Implementado**, com testes. O que a implementação decidiu ou descobriu:
+
+- **Dependência de mão única.** `com.docgen.desktop` depende da API, e a API não conhece o launcher: ela declara a interface pública `DesktopControl` (abrir janela, encerrar, conferir o segredo de instância), que o launcher implementa e registra como bean antes do refresh do contexto. Por isso os tokens de lançamento ficam em `com.docgen.api.LaunchTokenService` (com `issue()` público), e não no pacote desktop como o roadmap sugeria. Sem o launcher (testes e desenvolvimento), as rotas desktop respondem que o app não está rodando como desktop.
+- **Segunda execução.** Com a trava ocupada, o launcher espera até 3 s: se a trava for liberada (a outra instância estava saindo), vira a instância principal; se houver `instance.json` com PID vivo, pede a reabertura; se não houver `instance.json`, a outra instância ainda está subindo e abrirá a própria janela, então a segunda sai em silêncio (sem janela duplicada); se a instância existente não responder, um aviso diz isso. Um `instance.json` deixado por queda (PID morto) é apagado pela próxima instância principal.
+- **Encerramento.** O pedido chega numa thread do Tomcat, que é *daemon*, e uma thread herda essa marca. A primeira versão criava a thread de encerramento como daemon sem perceber: a JVM saía assim que o Tomcat parava, antes de apagar o `instance.json`. O teste em processo não pegou (a JVM de teste continua viva); o teste ponta a ponta com o JAR real pegou. A thread agora é explicitamente não daemon, e um teste reprova a regressão.
+- **Sinais do SO.** Em `SIGTERM`/logout, o Spring fecha o contexto no próprio *hook*, e o hook do launcher apaga o `instance.json` e libera a trava. Uma compactação pendente fica para o próximo início (rodar com o pool ainda aberto seria arriscado).
+- **Splash nativo: não implementado nesta fase.** Ele depende do empacotamento (`-splash:` via `--java-options` do `jpackage`), então fica para a Fase 7. Medido aqui: o app abre a janela em 5 a 6 s; um segundo clique nesse intervalo não abre janela duplicada.
+- **Bandeja.** Implementada com `SystemTray` e ícone desenhado em código, só quando há suporte. **Não verificada num desktop real**: o ambiente desta fase é *headless*. Fica para a validação da Fase 7.
+- **Navegador.** A lista de Chromium inclui Edge (presente no Windows 10 e 11), Chrome, Chromium e Brave; os caminhos são fixos por SO ou resolvidos só em entradas absolutas do `PATH`. Verificado em Linux com um `xdg-open` substituto e o Chromium do Playwright; macOS e Windows ficam para a Fase 7.
+- **Desligamento por inatividade.** O relógio conta a partir do maior entre o último sinal da janela (heartbeat, nova sessão ou reabertura) e o fim da última operação longa; hoje, as gerações da Engenharia (`ActivityTracker` no `JobService`). Downloads e respostas do chat entram nas Fases 3 e 4. Verificado com o JAR real e prazo reduzido por argumento (`--docgen.desktop.idle-timeout=15s`): o app saiu sozinho em 16 s e limpou o estado.
+- **Banco após "Apagar todos os meus dados".** O H2 2.4.240 já compacta por até 200 ms ao fechar (`MAX_COMPACT_TIME`, conferido no bytecode), o que cobre bancos pequenos, mas não os grandes. A remoção grava um pedido (`compact-on-exit`), e um `SHUTDOWN COMPACT` roda com o pool fechado: na saída ou no início seguinte.
+
+### Critérios de aceite
+
+| Critério | Evidência |
+|---|---|
+| `java -jar docgen-api.jar` sem variáveis abre a UI autenticada | `DesktopLauncherTest.startsWithoutAnyConfiguration…` e teste ponta a ponta com o JAR real |
+| A segunda execução reabre a mesma instância | `DesktopLauncherTest.aSecondStartReopens…` e ponta a ponta (saiu com 0 em cerca de 1 s, mesma porta, token novo) |
+| "Sair" encerra e libera a trava; nova execução sobe limpa | `DesktopLauncherTest.leavingThroughTheUi…` e ponta a ponta |
+| 10 min sem heartbeat encerra; download ou geração impedem | `DesktopApiTest` com relógio controlado; ponta a ponta com prazo reduzido |
+| Trava, reabertura com segredo errado, porta, abertura do navegador | `InstanceLockTest`, `DesktopLauncherTest.reopeningWithAWrongSecret…`, `BrowserOpenerTest` |

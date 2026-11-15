@@ -2,10 +2,12 @@
 // messages; the workspace translates the codes it knows.
 
 const ERRORS = {
-  network_error: 'Não foi possível contactar o servidor DocGen. Verifique se a API está em execução.',
-  invalid_credentials: 'Usuário ou senha incorretos.',
-  too_many_attempts: 'Muitas tentativas de acesso. Aguarde alguns instantes e tente novamente.',
-  authentication_required: 'Sua sessão expirou. Entre novamente.',
+  network_error: 'Não foi possível falar com o DocGen. Ele pode ter sido encerrado: abra-o de novo pelo menu ou pelo atalho.',
+  authentication_required: 'Sua sessão terminou. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_invalid: 'Este link de acesso expirou ou já foi usado. Abra o DocGen de novo pelo menu ou pelo atalho.',
+  launch_token_reused: 'Este link de acesso já tinha sido usado por outro programa. Por segurança, a sessão foi encerrada.',
+  origin_rejected: 'A requisição veio de uma página que não é o DocGen e foi bloqueada.',
+  desktop_unavailable: 'Esta ação só existe no aplicativo DocGen para desktop.',
   access_denied: 'Você não tem permissão para esta ação.',
   invalid_request: 'Os dados enviados são inválidos. Revise os campos destacados.',
   not_found: 'O recurso não foi encontrado.',
@@ -28,8 +30,13 @@ const ERRORS = {
   unsafe_markdown: 'O documento precisa ser Markdown passivo (sem HTML, imagens ou scripts) e começar com um título H1.',
   artifact_read_only: 'Diagramas são gerados a partir do plano e não podem ser editados.',
   nothing_to_export: 'Gere um plano arquitetural antes de exportar.',
-  too_many_sessions: 'Há sessões ativas demais no servidor.',
   invalid_host: 'Endereço de acesso não permitido.',
+  pairing_unavailable: 'Para conectar este navegador, clique em “Abrir DocGen” na janela do aplicativo DocGen.',
+  pairing_conflict: 'Outra solicitação de acesso apareceu ao mesmo tempo e, por segurança, todas foram canceladas. Clique em “Abrir DocGen” na janela do aplicativo para tentar de novo.',
+  pairing_denied: 'O acesso deste navegador foi recusado na janela do DocGen.',
+  pairing_expired: 'O código expirou antes da confirmação. Clique em “Abrir DocGen” na janela do aplicativo para gerar outro.',
+  pairing_replaced: 'Esta solicitação foi substituída ou cancelada. Use a aba aberta mais recentemente pelo DocGen ou clique em “Abrir DocGen” de novo.',
+  origin_rejected: 'Este endereço não pode solicitar acesso ao DocGen.',
   internal_error: 'Ocorreu um erro interno. Tente novamente.',
 };
 
@@ -43,10 +50,26 @@ const JOB_ERRORS = {
   provider_unavailable: 'O Ollama não está acessível neste computador. Abra o Ollama e tente novamente.',
   provider_failed: 'A requisição ao Ollama falhou. Tente novamente.',
   model_not_installed: 'O modelo escolhido não está instalado no Ollama. Instale-o pelo Ollama ou escolha outro modelo no projeto. O DocGen não baixa modelos sozinho.',
+  remote_model_refused: 'O modelo escolhido roda fora deste computador (nuvem do Ollama ou outro servidor), então o DocGen se recusou a usá-lo. Escolha um modelo local.',
   prompt_too_large: 'O conteúdo não cabe na janela de contexto do modelo. Reduza a descrição ou os anexos, ou escolha um modelo com contexto maior.',
   prompt_truncated: 'O Ollama descartou parte do conteúdo, então o resultado foi descartado por segurança. Atualize o Ollama e tente novamente.',
   internal_error: 'A tarefa falhou inesperadamente.',
 };
+
+const PULL_ERRORS = {
+  pull_not_found: 'A biblioteca do Ollama não tem este modelo.',
+  registry_unreachable: 'O Ollama não conseguiu acessar a biblioteca de modelos. Confira a conexão com a internet e tente de novo; o download continua de onde parou.',
+  disk_full: 'O disco encheu durante o download. Libere espaço e tente de novo; o download continua de onde parou.',
+  ollama_unavailable: 'O Ollama parou de responder durante o download. Abra o Ollama e tente de novo; o download continua de onde parou.',
+  ollama_timeout: 'O Ollama parou de enviar o progresso. Tente de novo; o download continua de onde parou.',
+  remote_model_refused: 'O DocGen nunca baixa modelos de nuvem.',
+  pull_failed: 'O Ollama não conseguiu baixar o modelo. Tente de novo.',
+};
+
+export function pullErrorMessage(error) {
+  if (!error) return '';
+  return PULL_ERRORS[error.code] || PULL_ERRORS.pull_failed;
+}
 
 export function errorMessage(error) {
   if (!error) return ERRORS.internal_error;

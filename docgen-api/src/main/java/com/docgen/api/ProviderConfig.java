@@ -9,6 +9,9 @@ import com.docgen.ProjectDocumentationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Optional;
+import java.util.function.Supplier;
+
 /**
  * Provider wiring. The only provider is the local Ollama service, whose
  * loopback endpoint is fixed in the core; nothing here is configurable from a
@@ -18,9 +21,18 @@ import org.springframework.context.annotation.Configuration;
 @Configuration(proxyBeanMethods = false)
 class ProviderConfig {
     @Bean
-    LLMProviderResolver llmProviderResolver(DocGenApiProperties properties) {
+    LLMProviderResolver llmProviderResolver(DocGenApiProperties properties, SettingsService settings) {
         OllamaEndpoint endpoint = properties.ollama().endpoint();
-        return model -> LLMProviderFactory.create(model, endpoint);
+        return model -> LLMProviderFactory.create(
+                modelFor(model, () -> settings.defaultModel(SessionTokenService.OWNER)), endpoint);
+    }
+
+    /** A project without a model uses the app's default model, and the CLI default without one. */
+    static String modelFor(String requested, Supplier<Optional<String>> appDefault) {
+        if (requested != null && !requested.isBlank()) {
+            return requested;
+        }
+        return appDefault.get().orElse(LLMProviderFactory.DEFAULT_MODEL);
     }
 
     @Bean

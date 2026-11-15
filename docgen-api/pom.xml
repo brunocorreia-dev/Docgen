@@ -19,6 +19,12 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <!-- Launcher handshake: stdin bootstrap secret, HMAC messages and readiness proofs. JDK only. -->
+            <groupId>com.docgen</groupId>
+            <artifactId>docgen-desktop-protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
@@ -47,6 +53,12 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>${pdfbox.version}</version>
+        </dependency>
+        <dependency>
+            <!-- CPU, memory, GPU and disk of this computer, read locally (no network). -->
+            <groupId>com.github.oshi</groupId>
+            <artifactId>oshi-core</artifactId>
+            <version>${oshi.version}</version>
         </dependency>
         <dependency>
             <!-- Static web workspace served same-origin from classpath:/static. -->
@@ -78,6 +90,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- The desktop launcher runs before Spring (single instance, free port, browser). -->
+                    <mainClass>com.docgen.desktop.DesktopLauncher</mainClass>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

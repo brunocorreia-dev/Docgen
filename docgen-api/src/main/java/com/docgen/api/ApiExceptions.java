@@ -44,8 +44,28 @@ final class UnprocessableContentException extends PublicApiException {
     }
 }
 
+final class ForbiddenException extends PublicApiException {
+    ForbiddenException(String code, String publicMessage) {
+        super(code, publicMessage);
+    }
+}
+
 final class CapacityExceededException extends PublicApiException {
     CapacityExceededException(String code, String publicMessage) {
         super(code, publicMessage);
+    }
+}
+
+/** A failure with its own HTTP status, such as Ollama being unreachable (503) or a full disk (507). */
+final class StatusException extends PublicApiException {
+    private final org.springframework.http.HttpStatus status;
+
+    StatusException(org.springframework.http.HttpStatus status, String code, String publicMessage) {
+        super(code, publicMessage);
+        this.status = status;
+    }
+
+    org.springframework.http.HttpStatus status() {
+        return status;
     }
 }

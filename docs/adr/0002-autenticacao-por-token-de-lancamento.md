@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Estado | **Aceita** (decisão 4.2 do pedido de realinhamento, revisada na aprovação da Fase 0: sessão por Bearer em `sessionStorage`, sem cookies) |
+| Estado | **Aceita e implementada** na Fase 2 (decisão 4.2 do pedido de realinhamento, revisada na aprovação da Fase 0: sessão por Bearer em `sessionStorage`, sem cookies; ajustes da implementação na seção final) |
 | Data | 2026-10-24 (revisão no mesmo dia) |
 | Fase | Proposta na Fase 0; implementação na Fase 2 |
 | Relacionadas | [ADR 0001](0001-shell-desktop.md), [ADR 0003](0003-somente-local.md), [roadmap](../desktop/ROADMAP.md) |
@@ -124,3 +124,25 @@ Sem credencial ambiente, o CSRF clássico não tem como acontecer. Mesmo assim, 
 - `Host` com outro nome ou outra porta → `400`.
 - `POST`/`PUT`/`DELETE` com `Origin` cruzado ou com `Sec-Fetch-Site: cross-site` → `403`.
 - Reabertura com segredo errado ou com `Origin` → recusada.
+
+## Implementação (Fase 2, 2026-10-24)
+
+Estado: **Implementado**, com testes. Ajustes e resultados:
+
+- **Retenção dos hashes consumidos: 5 minutos**, e não "até expirar" (30 s). Com 30 s, um token roubado no primeiro segundo e um navegador legítimo que demorasse mais de 30 s para abrir (início a frio numa máquina lenta) resultariam em "link expirado" para o usuário e sessão intacta para quem roubou. Com 5 min, a chegada tardia ainda é detectada como reuso. O custo: durante esses 5 min, quem leu o token também consegue derrubar a sessão legítima reapresentando-o. O servidor não distingue as duas trocas; confidencialidade vem antes de disponibilidade.
+- **Endurecimento por arquivo HTML local: avaliado e não adotado.** O arquivo de redirecionamento conteria o próprio token em disco, e navegadores em Snap ou Flatpak (o Firefox padrão do Ubuntu é Snap) não leem diretórios ocultos do usuário, o que quebraria o caso mais comum. A mitigação documentada para computadores compartilhados é montar `/proc` com `hidepid=2`.
+- **`Origin` em todo `POST`:** confirmado no Chromium (Linux, via Playwright, contra o JAR real): a troca do token saiu com `Origin: http://127.0.0.1:<porta>`, `Sec-Fetch-Site: same-origin`, sem `Referer` e sem cookie. Firefox e Safari e os demais SOs ficam para a Fase 7. A rota de reabertura não depende disso: ela também exige o segredo de instância.
+- **O papel da sessão** passou de `ANALYST` para `LOCAL_SESSION`; o dono é a constante `local`, e a migração `V3` converte os donos da v2.
+- **A configuração automática de usuário do Spring Boot** (`UserDetailsServiceAutoConfiguration`) foi excluída: sem ela, nenhum usuário padrão existe e nenhuma senha gerada aparece no log.
+- **Testes:** `ProtectedRoutesTest` descobre as rotas pelo `RequestMappingHandlerMapping`, então uma rota nova entra na verificação de `401` sem mexer no teste. Os testes de isolamento entre donos continuam, com linhas de outro dono gravadas direto no banco.
+
+### Critérios de aceite
+
+| Critério | Evidência |
+|---|---|
+| Sem `Authorization`, com token inválido ou com Basic → `401` em todas as rotas protegidas | `ProtectedRoutesTest` (todas as rotas mapeadas) e `DesktopLauncherTest` sobre HTTP real |
+| Nenhuma resposta define cookie | `ProtectedRoutesTest`, `AuthAndSecurityTest`, `DesktopLauncherTest` |
+| Segunda troca falha; troca após 30 s falha; reuso revoga a sessão | `LaunchTokenServiceTest`, `AuthAndSecurityTest`, `DesktopLauncherTest` e ponta a ponta no navegador |
+| `Host` com outro nome ou outra porta → `400` | `AuthAndSecurityTest` e `DesktopLauncherTest` (com socket bruto) |
+| `POST`/`PUT`/`DELETE` com `Origin` cruzado ou `Sec-Fetch-Site: cross-site` → `403` | `AuthAndSecurityTest`, `DataErasureApiTest` |
+| Reabertura com segredo errado ou com `Origin` → recusada | `DesktopApiTest`, `DesktopLauncherTest` |

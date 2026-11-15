@@ -93,6 +93,11 @@ public final class DocGenCLI implements Callable<Integer> {
             System.err.println("Install it first (for example: ollama pull " + SafeText.forTerminal(missing.model())
                     + "), or pass --model with a model you already have (see: ollama list).");
             return 1;
+        } catch (OllamaUnavailableException unavailable) {
+            System.err.println("Error: " + safeFailureMessage(unavailable));
+            System.err.println("Start Ollama (open the Ollama app, or run: ollama serve) and try again."
+                    + " If it listens on another port, pass --ollama-port.");
+            return 1;
         } catch (PromptTooLargeException tooLarge) {
             System.err.println("Error: " + safeFailureMessage(tooLarge));
             System.err.println("Narrow the selection with --include-ext or .docgenignore (preview it with --dry-run),"

@@ -11,16 +11,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Authenticates "Authorization: Bearer" tokens issued by {@link AuthTokenService}.
- * Unknown or expired tokens leave the request unauthenticated, so protected
- * endpoints answer 401 through the normal entry point.
+ * Authenticates "Authorization: Bearer" session tokens issued by
+ * {@link SessionTokenService}. Unknown or expired tokens leave the request
+ * unauthenticated, so protected endpoints answer 401 through the normal entry
+ * point. No cookie is ever read or written (ADR 0002).
  */
 final class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
     private static final String PREFIX = "Bearer ";
 
-    private final AuthTokenService tokens;
+    private final SessionTokenService tokens;
 
-    BearerTokenAuthenticationFilter(AuthTokenService tokens) {
+    BearerTokenAuthenticationFilter(SessionTokenService tokens) {
         this.tokens = tokens;
     }
 
