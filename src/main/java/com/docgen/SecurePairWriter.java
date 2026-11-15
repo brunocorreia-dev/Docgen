@@ -251,9 +251,21 @@ final class SecurePairWriter {
         observer.on(Event.BEFORE_QUARANTINE_MOVE, target.spec.name());
         directory.move(target.spec.name(), quarantineName);
         BasicFileAttributes movedAttributes = directory.attributesIfPresent(quarantineName);
+        boolean movedContentMatches = false;
+        if (movedAttributes != null && movedAttributes.isRegularFile()
+                && movedAttributes.fileKey() != null
+                && target.initialFileKey.equals(movedAttributes.fileKey())) {
+            try {
+                movedContentMatches = MessageDigest.isEqual(
+                        originalDigest, directory.digestEntry(quarantineName));
+            } catch (IOException ignored) {
+                // Treat an unverifiable move as a changed target.
+            }
+        }
         if (movedAttributes == null || !movedAttributes.isRegularFile()
                 || movedAttributes.fileKey() == null
-                || !target.initialFileKey.equals(movedAttributes.fileKey())) {
+                || !target.initialFileKey.equals(movedAttributes.fileKey())
+                || !movedContentMatches) {
             target.originalQuarantine = null;
             target.originalQuarantined = false;
             IOException changed = new IOException(
