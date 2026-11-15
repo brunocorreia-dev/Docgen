@@ -1,0 +1,138 @@
+package com.docgen;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
+import java.nio.file.Path;
+import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
+
+public final class RepoScanner {
+    private static final int MAX_FILE_BYTES = 256 * 1024;
+    private static final int MAX_FILE_CHARS = 20_000;
+    private static final int MAX_TOTAL_CHARS = 120_000;
+    private static final int MAX_DISCOVERED_ENTRIES = 4_096;
+    private static final int MAX_SCANNED_FILES = 512;
+    private static final int MAX_DIRECTORY_DEPTH = 64;
+    private static final int MAX_PATH_CHARS = 512;
+    private static final int MAX_FILE_TREE_CHARS = 20_000;
+    private static final int MAX_SKIPPED_METADATA_CHARS = 8_192;
+    private static final int MAX_EXCLUDED_METADATA_CHARS = 16_384;
+    private static final int MAX_METADATA_ITEMS = 256;
+    private static final int MAX_METADATA_ITEM_CHARS = MAX_PATH_CHARS + 160;
+
+    private static final String FILE_TRUNCATION_MARKER = "\n[TRUNCATED: file content limit reached]";
+    private static final String REPOSITORY_TRUNCATION_MARKER = "\n[TRUNCATED: repository content limit reached]";
+    private static final String TREE_TRUNCATION_MARKER = "[TRUNCATED: file tree metadata limit reached]";
+    private static final Set<OpenOption> SECURE_READ_OPTIONS =
+            Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+
+    private static final Set<String> SKIPPED_DIRS = Set.of(
+            ".git", ".idea", ".vscode", "target", "build", "dist", "out", "node_modules", ".gradle", ".mvn", "vendor"
+    );
+
+    private static final Set<String> SENSITIVE_COMPONENT_NAMES = Set.of(
+            ".env", ".envrc", ".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials", ".htpasswd",
+            "credentials", "credentials.json", "secrets", ".secrets", "secrets.json", "keys", ".keys",
+            "private-keys", "private_keys", "kubeconfig", "auth.json", "settings.xml",
+            "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+            ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".direnv",
+            ".agents", ".agent", ".claude", "claude", ".codex", ".cursor", ".continue", ".windsurf", ".aider", ".gemini"
+    );
+
+    private static final Set<String> TEXT_EXTENSIONS = Set.of(
+            ".java", ".kt", ".kts", ".xml", ".gradle", ".properties", ".yml", ".yaml", ".json", ".md", ".txt", ".sh",
+            ".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".scss", ".go", ".rs", ".rb", ".php", ".sql", ".toml"
+    );
+
+    private static final Set<String> SENSITIVE_EXTENSIONS = Set.of(
+            ".pem", ".key", ".p8", ".ppk", ".p12", ".pfx", ".jks", ".keystore", ".ovpn", ".sqlite", ".db"
+    );
+
+    private static final Set<String> SPECIAL_NAMES = Set.of("dockerfile", "makefile", "pom.xml", "readme", "license");
+
+    private final Limits limits;
+    private final AfterDiscoveryHook afterDiscoveryHook;
+
+    public RepoScanner() {
+        this(Limits.defaults(), () -> { });
+    }
+
+    RepoScanner(Limits limits) {
+        this(limits, () -> { });
+    }
+
+    RepoScanner(Limits limits, AfterDiscoveryHook afterDiscoveryHook) {
+        this.limits = limits;
+        this.afterDiscoveryHook = afterDiscoveryHook;
+    }
+
+    /**
+     * Scan-narrowing options. {@code allowedExtensions} is an optional allowlist:
+     * when non-empty, only files ending with one of these extensions are included.
+     * It can only narrow the built-in supported set; sensitive-file and ignore
+     * exclusions always run first and cannot be bypassed by it.
+     */
+    public record Options(Set<String> allowedExtensions) {
+        public Options {
+            allowedExtensions = normalize(allowedExtensions);
+        }
+
+        public static Options defaults() {
+            return new Options(Set.of());
+        }
+
+        public static Options withAllowedExtensions(Collection<String> extensions) {
+            return new Options(extensions == null ? Set.of() : new LinkedHashSet<>(extensions));
+        }
+
+        private static Set<String> normalize(Collection<String> extensions) {
+            if (extensions == null) {
+                return Set.of();
+            }
+            Set<String> normalized = new LinkedHashSet<>();
+            for (String extension : extensions) {
+                if (extension == null || extension.isBlank()) {
+                    continue;
+                }
+                String cleaned = extension.trim().toLowerCase(Locale.ROOT);
+                while (cleaned.startsWith(".")) {
+                    cleaned = cleaned.substring(1);
+                }
+                if (!cleaned.isEmpty()) {
+                    normalized.add("." + cleaned);
+                }
+            }
+            return Set.copyOf(normalized);
+        }
+    }
+
+    public RepoContext scan(Path repository) throws IOException {
+        return scan(repository, Options.defaults());
+    }
+
+    public RepoContext scan(Path repository, Options options) throws IOException {
+        Path root = repository.toAbsolutePath().normalize();
+        DocgenIgnore ignore = new DocgenIgnore();
+        BoundedMessages excluded = new BoundedMessages(MAX_EXCLUDED_METADATA_CHARS);
+        DiscoveryState discovery = new DiscoveryState(ignore, excluded, limits.maximumDiscoveredEntries());
+
